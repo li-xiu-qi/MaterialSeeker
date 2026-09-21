@@ -1,0 +1,16 @@
+# VideoSeeker 视频处理依赖。装在 dgx-spark 的推理环境（hearsight-env）。
+#
+# 说明三点取舍：
+# - 不装 moviepy：抽音轨直接调 ffmpeg 二进制，不为抽个音轨引入 Python 端 ffmpeg 绑定
+# - 装 opencv-python-headless 而非完整版：服务端无 GUI，完整版在 ARM Linux 上要多背
+#   libGL 依赖，headless 体积还小 10MB
+# - scenedetect 用 --no-deps 装：它的 opencv extra 会拉完整版 opencv 覆盖 headless
+
+scenedetect
+opencv-python-headless
+numpy
+tqdm
+fastapi
+uvicorn
+pydantic
+requests
