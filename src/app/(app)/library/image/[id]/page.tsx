@@ -53,7 +53,7 @@ export default async function ImageDetailPage({
           )}
 
           <p className="mt-4 text-sm leading-6 text-neutral-300">
-            {asset.caption ?? '（这张图还没有画面描述，检索时只能靠图片向量命中）'}
+            {asset.caption ?? '（这张图还没有画面描述，只能按画面内容命中）'}
           </p>
 
           {asset.caption && (
@@ -69,11 +69,11 @@ export default async function ImageDetailPage({
         <aside className="space-y-4">
           <dl className="space-y-1 text-[11px] text-neutral-600">
             <div className="flex justify-between gap-3">
-              <dt>图片向量</dt>
+              <dt>画面特征</dt>
               <dd className="text-neutral-500">{asset.hasVector ? '就绪' : '缺失'}</dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt>描述向量</dt>
+              <dt>描述特征</dt>
               <dd className="text-neutral-500">{asset.hasCaptionVector ? '就绪' : '缺失'}</dd>
             </div>
           </dl>
@@ -82,7 +82,7 @@ export default async function ImageDetailPage({
             <h2 className="text-xs font-medium text-neutral-400">相似素材（{neighbours.length}）</h2>
             {neighbours.length === 0 ? (
               <p className="mt-2 text-[11px] text-neutral-700">
-                这张图没有可用向量，算不出相似邻居。
+                这张图没有可用的画面特征，算不出相似素材。
               </p>
             ) : (
               <ul className="mt-3 space-y-2">

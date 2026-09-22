@@ -4,11 +4,14 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 
 /**
- * 删除索引按钮。整个素材库里唯一需要 JS 的动作，所以单独做成一个小岛，
+ * 删除按钮。整个素材库里唯一需要 JS 的动作，所以单独做成一个小岛，
  * 不把整个页面拖成客户端组件。
  *
- * 删除只摘索引不动源文件，删前要确认，删完刷新服务端渲染的列表。
- * JS 失效时这个按钮点不动，但列表内容照常可看。
+ * 界面上叫「删除」而不是「删除索引」：索引是实现细节，不该抛给用户。
+ * 但它确实不动源文件，所以确认框必须讲明「文件还在，只是之后搜不到」——
+ * 只改标签不讲清后果，会让人以为文件没了。
+ *
+ * 删前要确认，删完刷新服务端渲染的列表。JS 失效时按钮点不动，但列表照常可看。
  */
 export function LibraryDeleteButton({ id, title }: { id: number; title: string }) {
   const router = useRouter()
@@ -16,7 +19,12 @@ export function LibraryDeleteButton({ id, title }: { id: number; title: string }
   const [removing, setRemoving] = useState(false)
 
   function remove() {
-    if (!window.confirm(`删除「${title}」的索引？源文件不会被删除。`)) return
+    if (
+      !window.confirm(`将「${title}」从素材库移除？
+
+素材文件仍保留在素材目录，只是之后搜不到它。`)
+    )
+      return
     setRemoving(true)
     fetch(`/api/library/${id}`, { method: 'DELETE' })
       .then((r) => r.json())
@@ -35,7 +43,7 @@ export function LibraryDeleteButton({ id, title }: { id: number; title: string }
       onClick={remove}
       className="h-fit flex-none rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-40"
     >
-      {removing ? '删除中' : '删除索引'}
+      {removing ? '删除中' : '删除'}
     </button>
   )
 }

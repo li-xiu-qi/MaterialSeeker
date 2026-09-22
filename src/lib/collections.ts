@@ -1,4 +1,7 @@
 import { getDb } from './db'
+import type { Database } from 'better-sqlite3'
+import fs from 'node:fs'
+import path from 'node:path'
 
 /**
  * 素材库（collection）的增删查与作用域。
@@ -95,16 +98,264 @@ export function renameCollection(id: number, name: string): void {
 }
 
 /**
- * 删素材库。只允许删空库：非空时先让用户把素材移走或删掉，否则一堆素材的
- * collection_id 会指向不存在的库，按库过滤时它们凭空消失且查不到原因。
+ * 删素材库，**非空时级联删掉里面素材的索引记录**。
+ *
+ * 原先只允许删空库，要求用户先把素材一条条移走。那个要求不现实：素材多时
+ * 等于不让删库。改为级联删除，确认框里讲清后果。
+ *
+ * **级联只删索引记录，不动磁盘文件。** 理由是硬的：视频可能是用户自己拍的，
+ * 网站资源能重新下载，自己录的素材重新拿不回来，级联删文件一旦误点不可逆。
+ * 删记录有反悔余地，文件还在素材目录，重新入库即可恢复可检索状态。代价是
+ * 会留下无记录的孤立文件，这是用安全换的。
  */
-export function deleteCollection(id: number): void {
+export function deleteCollection(id: number): { removedAssets: number } {
   if (id === DEFAULT_COLLECTION_ID) throw new Error('默认库不能删除')
-  const n = collectionSize(id)
-  if (n > 0) {
-    throw new Error(`这个库还有 ${n} 条素材，先把它们移走或删除`)
+  const db = getDb()
+
+  // 不存在的 id 要报错，不能静默成功。否则界面上会显示「已删除 X」而 X 从未存在，
+  // 用户无法区分真删了和根本没这个库。
+  const exist = db.prepare('SELECT id FROM collections WHERE id = ?').get(id)
+  if (!exist) throw new Error('素材库不存在')
+
+  const ids = db
+    .prepare('SELECT id, kind FROM assets WHERE collection_id = ?')
+    .all(id) as Array<{ id: number; kind: string }>
+
+  const tx = db.transaction(() => {
+    for (const a of ids) removeAssetRecords(db, a.id, a.kind)
+    db.prepare('DELETE FROM collections WHERE id = ?').run(id)
+  })
+  tx()
+
+  return { removedAssets: ids.length }
+}
+
+/**
+ * 摘掉一个素材的全部索引记录。与 DELETE /api/library/[id] 同一套逻辑，
+ * 抽出来是为了让删库级联与单条删除走同一条路——两处各写一遍，某一边漏删
+ * 一张子表不会报错，只会留下查不到的孤儿行。
+ *
+ * 只删记录，不碰文件。
+ */
+export function removeAssetRecords(db: Database, id: number, kind: string): void {
+  if (kind === 'video') {
+    const tids = db.prepare('SELECT id FROM transcripts WHERE asset_id = ?').all(id) as Array<{
+      id: number
+    }>
+    for (const t of tids) {
+      db
+        .prepare(
+          'DELETE FROM sentences WHERE chunk_id IN (SELECT id FROM chunks WHERE transcript_id = ?)',
+        )
+        .run(t.id)
+      db.prepare('DELETE FROM chunks WHERE transcript_id = ?').run(t.id)
+      db.prepare('DELETE FROM transcript_sentences WHERE transcript_id = ?').run(t.id)
+    }
+    db.prepare('DELETE FROM transcripts WHERE asset_id = ?').run(id)
   }
-  getDb().prepare('DELETE FROM collections WHERE id = ?').run(id)
+  if (kind === 'video' || kind === 'image') {
+    db.prepare('DELETE FROM frames WHERE asset_id = ?').run(id)
+  }
+  if (kind === 'image') db.prepare('DELETE FROM images WHERE asset_id = ?').run(id)
+  if (kind === 'text') db.prepare('DELETE FROM text_notes WHERE asset_id = ?').run(id)
+  db.prepare('DELETE FROM assets WHERE id = ?').run(id)
+}
+
+/**
+ * 把素材搬到另一个库。**只改 collection_id，不碰磁盘文件。**
+ *
+ * 文件是按类型放在 dataDir/<kind>/ 下的，不按库分目录（见 paths.ts），所以
+ * 换库不影响任何一条 file_path 的有效性。这也是移动敢做成纯 SQL 的原因：
+ * 不搬文件就没有搬一半失败的状态。
+ *
+ * 返回实际改动的行数。目标库就是素材当前所在的库时，changes 为 0，调用方
+ * 要能区分「搬了 0 条」和「搬了 3 条」，不能一律显示成功。
+ */
+export function moveAssets(db: Database, ids: number[], toId: number): number {
+  if (ids.length === 0) return 0
+  const ph = ids.map(() => '?').join(',')
+  const info = db
+    .prepare(`UPDATE assets SET collection_id = ? WHERE id IN (${ph})`)
+    .run(toId, ...ids)
+  return info.changes
+}
+
+/**
+ * 复制素材到另一个库。**磁盘文件真的复制一份**，两份记录各指向自己的文件。
+ *
+ * 用户选的是真复制而不是共用同一文件：共用在改文件时会两边一起变，而复制
+ * 出来的那份本该是独立的。代价是体积翻倍，且删库仍然不删文件，会留下更多
+ * 无主文件（这条既定规则不变）。
+ *
+ * **帧缩略图不复制，两份记录共用。** thumb_path 是从视频抽出来的派生数据，
+ * 用户不会去编辑它，复制一份纯占盘；删库本来就不删文件，共用也没有 delete
+ * 时一边失效的问题。主文件与派生数据区别对待，别照搬「都复制」。
+ *
+ * 子表逐层复制，**新增主键重新生成**：assets、transcripts、chunks、
+ * sentences、transcript_sentences、frames、images、text_notes 都要复制。
+ * chunks_fts 由 AFTER INSERT 触发器自动同步，不用手动插。
+ *
+ * 本函数与 removeAssetRecords 是镜像关系：那边删掉哪些表，这边就要复制哪些
+ * 表。改一处不改另一处，结果是复制出来的素材缺一半数据，而缺数据不报错，
+ * 只表现为检索时少命中、详情页空白。所以两张表要一起看。
+ */
+export function copyAssets(db: Database, ids: number[], toId: number): number {
+  if (ids.length === 0) return 0
+
+  /** 把文件复制到同目录下的新名字，重名自动加序号。返回 null 表示没有主文件（文本）。 */
+  const duplicateFile = (src: string | null): string | null => {
+    if (!src || !fs.existsSync(src)) return null
+    const ext = path.extname(src)
+    const stem = path.basename(src, ext)
+    const dir = path.dirname(src)
+    let n = 1
+    let target = path.join(dir, `${stem}_copy${ext}`)
+    while (fs.existsSync(target)) {
+      target = path.join(dir, `${stem}_copy${n}${ext}`)
+      n += 1
+    }
+    fs.copyFileSync(src, target)
+    return target
+  }
+
+  const tx = db.transaction(() => {
+    let done = 0
+    for (const id of ids) {
+      const a = db
+        .prepare('SELECT kind, title, source_path, duration_ms, meta_json FROM assets WHERE id = ?')
+        .get(id) as
+        | { kind: string; title: string; source_path: string | null; duration_ms: number | null; meta_json: string | null }
+        | undefined
+      if (!a) continue
+
+      // 主文件：图片取 images.file_path（库内副本），视频取 source_path（库里那份）。
+      // 与 export 路由同一个理由：source_path 对图片记的是外部来源，早已不存在。
+      let primary: string | null = null
+      if (a.kind === 'image') {
+        const row = db
+          .prepare('SELECT file_path FROM images WHERE asset_id = ?')
+          .get(id) as { file_path: string } | undefined
+        primary = row?.file_path ?? null
+      } else if (a.kind === 'video') {
+        primary = a.source_path
+      }
+      const newPrimary = duplicateFile(primary)
+
+      const meta = (() => {
+        try {
+          const m = a.meta_json ? JSON.parse(a.meta_json) : {}
+          return typeof m === 'object' && m !== null ? { ...m, copiedFrom: id } : { copiedFrom: id }
+        } catch {
+          return { copiedFrom: id }
+        }
+      })()
+
+      const inserted = db
+        .prepare(
+          'INSERT INTO assets (kind, title, source_path, duration_ms, meta_json, collection_id) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+        .run(a.kind, a.title, newPrimary ?? a.source_path, a.duration_ms, JSON.stringify(meta), toId)
+      const newId = Number(inserted.lastInsertRowid)
+      done += 1
+
+      if (a.kind === 'video') {
+        const txs = db
+          .prepare('SELECT id, full_text, language, asr_engine FROM transcripts WHERE asset_id = ?')
+          .all(id) as Array<{ id: number; full_text: string; language: string | null; asr_engine: string | null }>
+        for (const t of txs) {
+          const nt = db
+            .prepare('INSERT INTO transcripts (asset_id, full_text, language, asr_engine) VALUES (?, ?, ?, ?)')
+            .run(newId, t.full_text, t.language, t.asr_engine)
+          const newTid = Number(nt.lastInsertRowid)
+
+          // 句子流：全片时间轴那条，跟着 transcript 换 id
+          const tsents = db
+            .prepare('SELECT start_ms, end_ms, text FROM transcript_sentences WHERE transcript_id = ?')
+            .all(t.id) as Array<{ start_ms: number; end_ms: number; text: string }>
+          for (const s of tsents) {
+            db.prepare('INSERT INTO transcript_sentences (transcript_id, start_ms, end_ms, text) VALUES (?, ?, ?, ?)')
+              .run(newTid, s.start_ms, s.end_ms, s.text)
+          }
+
+          // chunk 与它下属的 sentences：两层都要重新映射 id，嵌错了不会报错
+          const chunks = db
+            .prepare('SELECT id, chunk_index, start_ms, end_ms, text, chunk_strategy, embedding FROM chunks WHERE transcript_id = ?')
+            .all(t.id) as Array<{
+            id: number
+            chunk_index: number
+            start_ms: number
+            end_ms: number
+            text: string
+            chunk_strategy: string
+            embedding: Buffer | null
+          }>
+          for (const c of chunks) {
+            const nc = db
+              .prepare(
+                `INSERT INTO chunks (transcript_id, chunk_index, start_ms, end_ms, text, chunk_strategy, embedding)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              )
+              .run(newTid, c.chunk_index, c.start_ms, c.end_ms, c.text, c.chunk_strategy, c.embedding)
+            const newCid = Number(nc.lastInsertRowid)
+            const sents = db
+              .prepare('SELECT start_ms, end_ms, text FROM sentences WHERE chunk_id = ?')
+              .all(c.id) as Array<{ start_ms: number; end_ms: number; text: string }>
+            for (const s of sents) {
+              db.prepare('INSERT INTO sentences (chunk_id, start_ms, end_ms, text) VALUES (?, ?, ?, ?)')
+                .run(newCid, s.start_ms, s.end_ms, s.text)
+            }
+          }
+        }
+      }
+
+      // 帧：视频与图片都有。thumb_path 共用（见函数注释），embedding 复制
+      const frames = db
+        .prepare(
+          'SELECT timestamp_ms, thumb_path, caption, embedding, caption_embedding, scene_index FROM frames WHERE asset_id = ?',
+        )
+        .all(id) as Array<{
+        timestamp_ms: number
+        thumb_path: string | null
+        caption: string | null
+        embedding: Buffer | null
+        caption_embedding: Buffer | null
+        scene_index: number | null
+      }>
+      for (const f of frames) {
+        db.prepare(
+          `INSERT INTO frames (asset_id, timestamp_ms, thumb_path, caption, embedding, caption_embedding, scene_index)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(newId, f.timestamp_ms, f.thumb_path, f.caption, f.embedding, f.caption_embedding, f.scene_index)
+      }
+
+      if (a.kind === 'image') {
+        const im = db
+          .prepare('SELECT caption, embedding, caption_embedding FROM images WHERE asset_id = ?')
+          .get(id) as { caption: string | null; embedding: Buffer | null; caption_embedding: Buffer | null } | undefined
+        if (im) {
+          db.prepare(
+            'INSERT INTO images (asset_id, file_path, caption, embedding, caption_embedding) VALUES (?, ?, ?, ?, ?)',
+          ).run(newId, newPrimary, im.caption, im.embedding, im.caption_embedding)
+        }
+      }
+
+      if (a.kind === 'text') {
+        const tn = db
+          .prepare('SELECT content, embedding FROM text_notes WHERE asset_id = ?')
+          .get(id) as { content: string; embedding: Buffer | null } | undefined
+        if (tn) {
+          db.prepare('INSERT INTO text_notes (asset_id, content, embedding) VALUES (?, ?, ?)').run(
+            newId,
+            tn.content,
+            tn.embedding,
+          )
+        }
+      }
+    }
+    return done
+  })
+
+  return tx()
 }
 
 /**
