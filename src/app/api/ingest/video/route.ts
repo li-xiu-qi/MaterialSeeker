@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { ingestVideo } from '@/lib/ingestVideo'
+import { normalizeCollectionId } from '@/lib/collections'
 
 export const runtime = 'nodejs'
 export const maxDuration = 1800
@@ -18,7 +19,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 })
   }
 
-  const b = body as { videoPath?: string; title?: string; strategy?: string }
+  const b = body as { videoPath?: string; title?: string; strategy?: string; collectionId?: number }
   if (!b.videoPath) {
     return NextResponse.json({ error: 'need videoPath（先用 /api/upload 落地）' }, { status: 400 })
   }
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
       videoPath: b.videoPath,
       title: b.title,
       strategy,
+      collectionId: normalizeCollectionId(b.collectionId),
     })
     return NextResponse.json({ ok: true, ...result })
   } catch (e) {

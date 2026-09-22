@@ -16,7 +16,25 @@ export function getDb(): Database.Database {
   db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 5000')
   initSchema(db)
+  migrateCollections(db)
   return db
+}
+
+/**
+ * 给存量库加 collection 列。
+ *
+ * CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，所以这一步必须单独做，
+ * 否则升级后旧库里 assets 没有 collection_id，所有按库过滤的 SQL 直接报错。
+ * 做法：缺列就加（默认 1，指向默认库），确保默认库存在，再把游离行收编。
+ * 幂等，每次启动都跑，重复跑没有副作用。
+ */
+function migrateCollections(d: Database.Database) {
+  const cols = d.prepare('PRAGMA table_info(assets)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'collection_id')) {
+    d.exec('ALTER TABLE assets ADD COLUMN collection_id INTEGER NOT NULL DEFAULT 1')
+  }
+  d.prepare('INSERT OR IGNORE INTO collections (id, name) VALUES (1, ?)').run('默认库')
+  d.prepare('UPDATE assets SET collection_id = 1 WHERE collection_id IS NULL OR collection_id = 0').run()
 }
 
 function initSchema(d: Database.Database) {
@@ -106,6 +124,14 @@ function initSchema(d: Database.Database) {
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS captions_fts USING fts5(
       caption, content=''
+    );
+
+    -- 素材库（collection）。一个素材归属且只归属一个库，库是检索的作用域。
+    -- 没有库的概念时每次检索都是全表，素材一多就只剩变慢一条路。
+    CREATE TABLE IF NOT EXISTS collections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
   `)
 

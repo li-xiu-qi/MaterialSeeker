@@ -1,4 +1,5 @@
 import { getDb, embeddingToBlob } from './db'
+import { DEFAULT_COLLECTION_ID } from './collections'
 import { PATHS } from './paths'
 import { encodeBatch, encodeImage, PASSAGE_INSTRUCTION } from './embed'
 import { chunkByScene, chunkFixed, chunkGreedy, type Sentence } from './chunking'
@@ -18,6 +19,8 @@ import { chunkByScene, chunkFixed, chunkGreedy, type Sentence } from './chunking
 const VIDEO_SERVICE = process.env.VIDEOSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
 
 export interface VideoIngestOptions {
+  /** 归到哪个素材库，缺省默认库 */
+  collectionId?: number
   videoPath: string
   title?: string
   strategy?: 'scene' | 'fixed' | 'greedy'
@@ -38,6 +41,7 @@ export interface VideoIngestResult {
 export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngestResult> {
   const db = getDb()
   const {
+    collectionId = DEFAULT_COLLECTION_ID,
     videoPath,
     title = videoPath.split(/[\\/]/).pop() || videoPath,
     strategy = 'scene',
@@ -77,7 +81,9 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
 
   // --- 2. asset + transcript + sentences ---
   const asset = db
-    .prepare('INSERT INTO assets (kind, title, source_path, meta_json) VALUES (?, ?, ?, ?)')
+    .prepare(
+      'INSERT INTO assets (kind, title, source_path, meta_json, collection_id) VALUES (?, ?, ?, ?, ?)',
+    )
     .run(
       'video',
       title,
@@ -87,6 +93,7 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
         sentence_count: sentences.length,
         frame_count: data.frames.length,
       }),
+      collectionId,
     )
   const assetId = Number(asset.lastInsertRowid)
 

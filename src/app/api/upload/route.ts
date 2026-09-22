@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { PATHS } from '@/lib/paths'
 import { ingestImage } from '@/lib/ingest'
+import { normalizeCollectionId } from '@/lib/collections'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -14,6 +15,8 @@ export const maxDuration = 300
  * 图片上传即入库（编码一张图是秒级，堵在请求里可接受）。
  * 视频上传只落地，返回 assetId，由 /api/ingest/video 单独驱动处理流程，
  * 因为视频转写加抽帧是分钟级，不能占着 HTTP 连接。
+ *
+ * collectionId 字段决定归到哪个库，不给就是默认库。
  */
 
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
@@ -26,6 +29,8 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: '需要 multipart/form-data' }, { status: 400 })
   }
+
+  const collectionId = normalizeCollectionId(form.get('collectionId') as string | null)
 
   const file = form.get('file')
   if (!(file instanceof File)) {
@@ -66,11 +71,12 @@ export async function POST(req: Request) {
   if (isImage) {
     const caption = (form.get('caption') as string | null)?.trim() || undefined
     try {
-      const assetId = await ingestImage(safeName, target, caption)
+      const assetId = await ingestImage(safeName, target, caption, collectionId)
       return NextResponse.json({
         ok: true,
         kind: 'image',
         assetId,
+        collectionId,
         path: target,
         indexed: true,
       })
@@ -88,6 +94,7 @@ export async function POST(req: Request) {
     kind: 'video',
     path: target,
     indexed: false,
-    next: 'POST /api/ingest/video  { "videoPath": "' + target + '" }',
+    collectionId,
+    next: 'POST /api/ingest/video  { "videoPath": "' + target + '", "collectionId": ' + collectionId + ' }',
   })
 }

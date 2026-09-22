@@ -15,6 +15,7 @@
 
 import { getDb, cosineSim, blobToEmbedding, embeddingToBlob, VECTOR_DIM } from './db'
 import { encodeText } from './embed'
+import { DEFAULT_COLLECTION_ID, scopeClause, scopeArgs } from './collections'
 
 export type ModalityFilter = 'all' | 'video' | 'image' | 'text'
 
@@ -71,10 +72,17 @@ const TOP_K_PER_ROUTE = 20
 
 export async function search(
   query: string,
-  opts: { modality?: ModalityFilter; topK?: number } = {},
+  opts: { modality?: ModalityFilter; topK?: number; collectionId?: number } = {},
 ): Promise<SearchHit[]> {
   const modality = opts.modality ?? 'all'
   const topK = opts.topK ?? 30
+  // 检索作用域。不给就是默认库，不是全库——全库检索在素材多起来之后只有
+  // 变慢一条路，而作用域应该是显式选择而不是默认行为。
+  const collectionId = opts.collectionId ?? DEFAULT_COLLECTION_ID
+  // 作用域条件统一由 helper 产出，四路不能各拼一次（拼漏就变成「选了全部
+  // 却还在按库过滤」，没有报错，只是结果莫名变少）
+  const scope = scopeClause(collectionId)
+  const scopeArg = scopeArgs(collectionId)
   const db = getDb()
 
   const hits: SearchHit[] = []
@@ -90,9 +98,9 @@ export async function search(
                   ORDER BY f.timestamp_ms LIMIT 1) AS cover_frame
          FROM chunks c JOIN transcripts t ON t.id = c.transcript_id
          JOIN assets a ON a.id = t.asset_id
-         WHERE c.embedding IS NOT NULL`,
+         WHERE c.embedding IS NOT NULL ${scope}`,
       )
-      .all() as Array<{
+      .all(...scopeArg) as Array<{
       id: number
       text: string
       start_ms: number
@@ -135,9 +143,10 @@ export async function search(
         `SELECT f.id, f.timestamp_ms, f.thumb_path, f.caption, f.embedding, f.caption_embedding,
                 a.id AS asset_id, a.title
          FROM frames f JOIN assets a ON a.id = f.asset_id
-         WHERE f.embedding IS NOT NULL OR f.caption_embedding IS NOT NULL`,
+         WHERE (f.embedding IS NOT NULL OR f.caption_embedding IS NOT NULL)
+           ${scope}`,
       )
-      .all() as Array<{
+      .all(...scopeArg) as Array<{
       id: number
       timestamp_ms: number
       thumb_path: string | null
@@ -185,9 +194,10 @@ export async function search(
         `SELECT im.id, im.file_path, im.caption, im.embedding, im.caption_embedding,
                 a.id AS asset_id, a.title
          FROM images im JOIN assets a ON a.id = im.asset_id
-         WHERE im.embedding IS NOT NULL OR im.caption_embedding IS NOT NULL`,
+         WHERE (im.embedding IS NOT NULL OR im.caption_embedding IS NOT NULL)
+           ${scope}`,
       )
-      .all() as Array<{
+      .all(...scopeArg) as Array<{
       id: number
       file_path: string
       caption: string | null
@@ -248,10 +258,10 @@ export async function search(
            FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
            JOIN transcripts t ON t.id = c.transcript_id
            JOIN assets a ON a.id = t.asset_id
-           WHERE chunks_fts MATCH ?
+           WHERE chunks_fts MATCH ? ${scope}
            ORDER BY rank LIMIT ?`,
         )
-        .all(ftsQuery, TOP_K_PER_ROUTE) as Array<{
+        .all(ftsQuery, ...scopeArg, TOP_K_PER_ROUTE) as Array<{
         id: number
         text: string
         start_ms: number

@@ -1,15 +1,12 @@
-'use client'
-
-import { useState } from 'react'
-
 import { fmtMs, fmtScore, typeLabel, sourceLabel } from '@/lib/format'
 import { ChunkResultCard, type SentenceHit } from './ChunkResultCard'
-import { MediaPreview, type PreviewItem } from './MediaPreview'
 
 /**
- * 结果列表。这一层是客户端组件，唯一的原因是它要管「哪张图正在预览」
- * 这个交互状态。渲染数据全部由服务端组件算好后传进来（含 media URL），
- * 本文件不做任何路径计算。
+ * 结果列表。**服务端组件，不再需要 'use client'。**
+ *
+ * 原先这里是客户端组件，为了管「哪张图正在预览」。后来发现客户端 JS 一旦
+ * 没生效，整个结果列表连文字都渲染不出来，代价太大。现在缩略图就是一个
+ * 指向原图的 <a target="_blank">，点击在新标签页看大图，完全不依赖 JS。
  *
  * 界面上不出现内部字段名与原始分数：类型与来源走中文名，相似度走百分数。
  */
@@ -35,6 +32,8 @@ export interface ResultItem {
     endMs: number
     sentences: SentenceHit[]
     videoUrl: string | null
+    /** 定位播放落点（视频详情页加秒数） */
+    seekHref: string | null
   } | null
 }
 
@@ -43,14 +42,12 @@ interface Props {
 }
 
 export function ResultList({ items }: Props) {
-  const [preview, setPreview] = useState<PreviewItem | null>(null)
-
   if (items.length === 0) {
     return <p className="mt-6 text-sm text-neutral-400">没有命中</p>
   }
 
   return (
-    <>
+    <div>
       <p className="mt-6 text-sm text-neutral-400">命中 {items.length} 条</p>
 
       <ul className="mt-4 space-y-3">
@@ -74,22 +71,17 @@ export function ResultList({ items }: Props) {
                 startMs={it.chunk.startMs}
                 endMs={it.chunk.endMs}
                 sentences={it.chunk.sentences}
+                seekHref={it.chunk.seekHref}
               />
             ) : (
               <div className="mt-2 flex gap-3">
                 {it.mediaUrl ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPreview({
-                        url: (it.fullUrl ?? it.mediaUrl) as string,
-                        caption: it.text || null,
-                        title: it.title,
-                        meta: it.meta,
-                      })
-                    }
+                  <a
+                    href={(it.fullUrl ?? it.mediaUrl) as string}
+                    target="_blank"
+                    rel="noreferrer"
                     className="flex-none rounded border border-neutral-800 transition hover:border-neutral-500"
-                    title="点击放大预览"
+                    title="点击查看原图"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -102,7 +94,7 @@ export function ResultList({ items }: Props) {
                           : 'h-32 max-w-[16rem] rounded object-cover'
                       }
                     />
-                  </button>
+                  </a>
                 ) : (
                   <div
                     className={
@@ -122,8 +114,6 @@ export function ResultList({ items }: Props) {
           </li>
         ))}
       </ul>
-
-      <MediaPreview item={preview} onClose={() => setPreview(null)} />
-    </>
+    </div>
   )
 }

@@ -5,6 +5,7 @@ import { getDb, embeddingToBlob } from './db'
 import { PATHS } from './paths'
 import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
 import { chunkGreedy } from './chunking'
+import { DEFAULT_COLLECTION_ID } from './collections'
 
 /**
  * 文本入库（M1 唯一打通的入库路径）。
@@ -13,7 +14,11 @@ import { chunkGreedy } from './chunking'
  * 每块单独编码入库，嵌带入库侧 instruction。文本笔记通常不长，多数情况
  * 只有一块，但切块逻辑先跑通，视频入库直接复用。
  */
-export async function ingestText(title: string, content: string): Promise<number> {
+export async function ingestText(
+  title: string,
+  content: string,
+  collectionId: number = DEFAULT_COLLECTION_ID,
+): Promise<number> {
   const db = getDb()
 
   const sentences = [{ start_ms: 0, end_ms: 0, text: content }]
@@ -32,8 +37,10 @@ export async function ingestText(title: string, content: string): Promise<number
   }
 
   const insertAsset = db
-    .prepare('INSERT INTO assets (kind, title, source_path, meta_json) VALUES (?, ?, ?, ?)')
-    .run('text', title, null, JSON.stringify({ bytes: content.length }))
+    .prepare(
+      'INSERT INTO assets (kind, title, source_path, meta_json, collection_id) VALUES (?, ?, ?, ?, ?)',
+    )
+    .run('text', title, null, JSON.stringify({ bytes: content.length }), collectionId)
   const assetId = Number(insertAsset.lastInsertRowid)
 
   const insertTranscript = db
@@ -89,6 +96,7 @@ export async function ingestImage(
   title: string,
   filePath: string,
   caption?: string,
+  collectionId: number = DEFAULT_COLLECTION_ID,
 ): Promise<number> {
   const db = getDb()
 
@@ -104,8 +112,16 @@ export async function ingestImage(
   const capVec = caption ? vectors[1] : null
 
   const insertAsset = db
-    .prepare('INSERT INTO assets (kind, title, source_path, meta_json) VALUES (?, ?, ?, ?)')
-    .run('image', title, filePath, JSON.stringify({ has_caption: Boolean(caption) }))
+    .prepare(
+      'INSERT INTO assets (kind, title, source_path, meta_json, collection_id) VALUES (?, ?, ?, ?, ?)',
+    )
+    .run(
+      'image',
+      title,
+      filePath,
+      JSON.stringify({ has_caption: Boolean(caption) }),
+      collectionId,
+    )
   const assetId = Number(insertAsset.lastInsertRowid)
 
   db.prepare(
@@ -133,6 +149,7 @@ export async function stageUpload(
   kind: 'image' | 'video',
   originalName: string,
   bytes: Buffer,
+  collectionId: number = DEFAULT_COLLECTION_ID,
 ): Promise<{ path: string; assetId: number }> {
   const db = getDb()
   const dir = kind === 'image' ? PATHS.imagesDir : PATHS.videosDir
@@ -149,8 +166,10 @@ export async function stageUpload(
   fs.writeFileSync(target, bytes)
 
   const info = db
-    .prepare('INSERT INTO assets (kind, title, source_path, meta_json) VALUES (?, ?, ?, ?)')
-    .run(kind, safe, target, JSON.stringify({ staged: true, bytes: bytes.length }))
+    .prepare(
+      'INSERT INTO assets (kind, title, source_path, meta_json, collection_id) VALUES (?, ?, ?, ?, ?)',
+    )
+    .run(kind, safe, target, JSON.stringify({ staged: true, bytes: bytes.length }), collectionId)
 
   return { path: target, assetId: Number(info.lastInsertRowid) }
 }
