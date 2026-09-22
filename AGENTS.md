@@ -25,8 +25,18 @@ npm run typecheck   # tsc --noEmit
 ```bash
 ~/xinfer-env/bin/python inference/server.py --port 8280
 ~/hearsight-env/bin/python inference/video_ingest.py --port 8281
-npx next dev --port 9280
+./node_modules/.bin/next dev --port 9280
 ```
+
+重启时三个坑：按进程名批量匹配（模式串里出现 `next`、`python` 这类字样）会把 ssh 自身的命令行一并匹配上，命令自杀返回 255，且端口可能已释放、服务没起；要拿 PID 就从端口反查（`ss -ltnp | grep ':9280' | grep -oP 'pid=\K[0-9]+'），这条命令自身不含进程名，不会自匹配；脱离会话的环境下 npx 解析不到本地 node_modules，会临时下载并跑错目录，改用 node_modules 内的 next 二进制绝对路径；8281 用 `~/hearsight-env`，8280 用 `~/xinfer-env`，别混。
+
+## 视频素材的三个坑（都实测过）
+
+opencv-python-headless 不带 AV1 解码器。B 站高画质档默认下发 AV1，`cv2.VideoCapture` 直接失败，抽帧零产物，日志特征是 `Failed to get pixel format`。不要写成「B 站需要转码」这种按来源判断的规则，触发条件是「试读一帧失败就跑 ffmpeg 转 H.264 副本」，这样以后遇到 WebM、HEVC 等未知编码也一并覆盖。副本交给 `detect_scenes` 时传 `already_checked`，否则同一文件会被转码两遍。
+
+yt-dlp 的 `--ffmpeg-location` 必须指向二进制文件，指向目录不生效，它会照旧报 ffmpeg not installed 然后跳过合并音视频。后果极具误导性：下载显示成功、文件在位、大小正常，只有下游发现转写零句。凡是下载来的素材，入库前必须用 ffprobe 确认「有视频流且有音频流」，不能凭退出码判断链路健康。
+
+抽帧服务（inference/video_ingest.py）没有 logging 配置，新函数里直接引用 `log` 会 NameError，表现为接口 500 而不是启动失败。logger 已 `logging.getLogger` 配好，日志落 `/tmp/vs-video.log`。
 
 ## 几条硬约束
 

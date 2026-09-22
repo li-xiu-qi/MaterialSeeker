@@ -31,6 +31,10 @@ export interface ChunkHit {
   source: 'vector' | 'keyword'
   assetId: number
   assetTitle: string
+  /** 视频文件路径，前端定位播放用；文本笔记没有对应文件，为 null */
+  assetPath: string | null
+  /** 该素材最早一帧的缩略图，用作视频卡片封面 */
+  coverFrame: string | null
   chunkText: string
   startMs: number
   endMs: number
@@ -80,7 +84,10 @@ export async function search(
     const [qVec] = await encodeText(query, 'query')
     const rows = db
       .prepare(
-        `SELECT c.id, c.text, c.start_ms, c.end_ms, c.embedding, a.id AS asset_id, a.title
+        `SELECT c.id, c.text, c.start_ms, c.end_ms, c.embedding,
+                a.id AS asset_id, a.title, a.source_path AS asset_path,
+                (SELECT f.thumb_path FROM frames f WHERE f.asset_id = a.id
+                  ORDER BY f.timestamp_ms LIMIT 1) AS cover_frame
          FROM chunks c JOIN transcripts t ON t.id = c.transcript_id
          JOIN assets a ON a.id = t.asset_id
          WHERE c.embedding IS NOT NULL`,
@@ -93,6 +100,8 @@ export async function search(
       embedding: Buffer
       asset_id: number
       title: string
+      asset_path: string | null
+      cover_frame: string | null
     }>
 
     const scored = rows
@@ -111,6 +120,8 @@ export async function search(
         source: 'vector',
         assetId: r.asset_id,
         assetTitle: r.title,
+        assetPath: r.asset_path,
+        coverFrame: r.cover_frame,
         chunkText: r.text,
         startMs: r.start_ms,
         endMs: r.end_ms,
@@ -230,6 +241,9 @@ export async function search(
       const rows = db
         .prepare(
           `SELECT c.id, c.text, c.start_ms, c.end_ms, a.id AS asset_id, a.title,
+                  a.source_path AS asset_path,
+                  (SELECT f.thumb_path FROM frames f WHERE f.asset_id = a.id
+                    ORDER BY f.timestamp_ms LIMIT 1) AS cover_frame,
                   bm25(chunks_fts) AS rank
            FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
            JOIN transcripts t ON t.id = c.transcript_id
@@ -244,6 +258,8 @@ export async function search(
         end_ms: number
         asset_id: number
         title: string
+        asset_path: string | null
+        cover_frame: string | null
         rank: number
       }>
       for (const r of rows) {
@@ -257,6 +273,8 @@ export async function search(
           source: 'keyword',
           assetId: r.asset_id,
           assetTitle: r.title,
+          assetPath: r.asset_path,
+          coverFrame: r.cover_frame,
           chunkText: r.text,
           startMs: r.start_ms,
           endMs: r.end_ms,

@@ -1,10 +1,16 @@
 /**
- * 首页，M1-M3 冒烟界面：一个检索栏 + 混合结果流 + 上传面板。
+ * 首页：统一检索栏 + 混合结果流 + 入库面板。
  * 交互设计见 product-design 仓 01_PRD/产品需求文档.md 第四节。
+ *
+ * 本文件是服务端组件，负责把检索结果加工成客户端组件可直接渲染的
+ * view model（重点是算好媒体 URL：路径计算要用 node:path，客户端做不了）。
  */
 import { search } from '@/lib/search'
-import type { SearchHit } from '@/lib/search'
+import Link from 'next/link'
+import { toMediaUrl, toThumbUrl } from '@/lib/media'
+import { fmtMs } from '@/lib/format'
 import { UploadPanel } from '@/components/UploadPanel'
+import { ResultList, type ResultItem } from '@/components/ResultList'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,12 +20,67 @@ export default async function HomePage({
   searchParams: Promise<{ q?: string; m?: string }>
 }) {
   const { q, m } = await searchParams
-  let hits: SearchHit[] = []
+  let items: ResultItem[] = []
   let error: string | null = null
 
   if (q && q.trim()) {
     try {
-      hits = await search(q.trim(), { modality: (m as 'all') || 'all' })
+      const hits = await search(q.trim(), { modality: (m as 'all') || 'all' })
+      items = hits.map((h): ResultItem => {
+        if (h.type === 'chunk') {
+          return {
+            key: `${h.type}:${h.id}:${h.source}`,
+            type: h.type,
+            source: h.source,
+            score: h.score,
+            text: h.chunkText,
+            title: h.assetTitle,
+            meta: `${h.assetTitle} · ${fmtMs(h.startMs)} - ${fmtMs(h.endMs)}`,
+            mediaUrl: null,
+            coverUrl: toThumbUrl(h.coverFrame, 320),
+            isVideo: Boolean(h.assetPath),
+            chunk: {
+              chunkText: h.chunkText,
+              startMs: h.startMs,
+              endMs: h.endMs,
+              sentences: h.sentences,
+              videoUrl: toMediaUrl(h.assetPath),
+            },
+          }
+        }
+
+        if (h.type === 'frame') {
+          return {
+            key: `${h.type}:${h.id}:${h.source}`,
+            type: h.type,
+            source: h.source,
+            score: h.score,
+            text: h.caption ?? '',
+            title: h.assetTitle,
+            meta: `${h.assetTitle} · ${fmtMs(h.timestampMs)}`,
+            mediaUrl: toThumbUrl(h.thumbPath, 320),
+            fullUrl: toMediaUrl(h.thumbPath),
+            coverUrl: null,
+            isVideo: true,
+            chunk: null,
+          }
+        }
+
+        return {
+          key: `${h.type}:${h.id}:${h.source}`,
+          type: h.type,
+          source: h.source,
+          score: h.score,
+          text: h.caption ?? '',
+          title: h.assetTitle,
+          meta: h.assetTitle,
+          mediaUrl: toThumbUrl(h.filePath, 320),
+          fullUrl: toMediaUrl(h.filePath),
+          coverUrl: null,
+          isVideo: false,
+          chunk: null,
+        }
+      })
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     }
@@ -28,9 +89,12 @@ export default async function HomePage({
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="text-2xl font-semibold">VideoSeeker</h1>
-      <p className="mt-1 text-sm text-neutral-400">
-        多模态内容检索工作台（冒烟界面）
-      </p>
+      <div className="mt-1 flex items-baseline gap-3">
+        <p className="text-sm text-neutral-400">多模态内容检索工作台</p>
+        <Link href="/library" className="text-xs text-neutral-500 underline hover:text-neutral-300">
+          素材库
+        </Link>
+      </div>
 
       <form action="/" method="get" className="mt-6 flex gap-2">
         <input
@@ -55,52 +119,7 @@ export default async function HomePage({
         </p>
       )}
 
-      {q && !error && (
-        <p className="mt-6 text-sm text-neutral-400">
-          {hits.length === 0 ? '没有命中' : `命中 ${hits.length} 条`}
-        </p>
-      )}
-
-      <ul className="mt-4 space-y-3">
-        {hits.map((h) => (
-          <li
-            key={`${h.type}:${h.id}:${h.source}`}
-            className="rounded-md border border-neutral-800 bg-neutral-900/60 p-4"
-          >
-            <div className="flex items-center gap-2 text-xs text-neutral-500">
-              <span className="rounded bg-neutral-800 px-1.5 py-0.5">{h.type}</span>
-              <span>{h.source}</span>
-              <span className="ml-auto tabular-nums">{h.score.toFixed(3)}</span>
-            </div>
-            {h.type === 'chunk' && (
-              <>
-                <p className="mt-2 text-sm text-neutral-300">{h.chunkText}</p>
-                <p className="mt-1 text-xs text-neutral-500">
-                  {h.assetTitle} · {fmtMs(h.startMs)} - {fmtMs(h.endMs)} ·{' '}
-                  {h.sentences.length} 句
-                </p>
-              </>
-            )}
-            {h.type === 'frame' && (
-              <p className="mt-2 text-sm text-neutral-300">
-                {h.assetTitle} · {fmtMs(h.timestampMs)} · {h.caption ?? '（无描述）'}
-              </p>
-            )}
-            {h.type === 'image' && (
-              <p className="mt-2 text-sm text-neutral-300">
-                {h.assetTitle} · {h.caption ?? '（无描述）'}
-              </p>
-            )}
-          </li>
-        ))}
-      </ul>
+      {q && !error && <ResultList items={items} />}
     </main>
   )
-}
-
-function fmtMs(ms: number): string {
-  const total = Math.floor(ms / 1000)
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${String(s).padStart(2, '0')}`
 }

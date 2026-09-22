@@ -17,6 +17,8 @@ export const PATHS = {
   imagesDir: path.join(dataDir, 'images'),
   /** 抽出的关键帧（含缩略图） */
   framesDir: path.join(dataDir, 'frames'),
+  /** 列表用缩略图缓存（按 源文件+宽度 生成，命中即复用） */
+  thumbsDir: path.join(dataDir, 'thumbs'),
   /** 中间产物（ffmpeg 拆出的音频、临时文件） */
   tmpDir: path.join(dataDir, 'tmp'),
   /** SQLite 主库 */
@@ -28,6 +30,7 @@ for (const dir of [
   PATHS.videosDir,
   PATHS.imagesDir,
   PATHS.framesDir,
+  PATHS.thumbsDir,
   PATHS.tmpDir,
 ]) {
   fs.mkdirSync(dir, { recursive: true })

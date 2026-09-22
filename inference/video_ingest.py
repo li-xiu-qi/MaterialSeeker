@@ -18,6 +18,11 @@ import sys
 import tempfile
 from typing import Any
 
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("videoseeker-video")
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -186,21 +191,34 @@ def detect_scenes(
     threshold: float = 27.0,
     min_scene_duration: float = 5.0,
     max_scenes: int = 50,
+    already_checked: bool = False,
 ) -> list[dict]:
     """ContentDetector 检测场景边界，返回 [{start_ms, end_ms}]。
 
     零场景时退化为单场景（覆盖全片），避免抽不到帧。场景数超上限时
     按顺序等分合并，保证不丢片段也不爆炸。
+
+    cv2 解不了的编码（AV1 等本机 opencv 无解码器的情况）先转码成
+    H.264 再检测，转码产物用完即删。调用方若已备好可解码副本
+    （process 里会备），传 already_checked=True 避免重复转码。
     """
     from scenedetect import ContentDetector, SceneManager, open_video
 
-    video = open_video(video_path)
-    sm = SceneManager()
-    sm.add_detector(ContentDetector(threshold=threshold))
-    sm.detect_scenes(video)
-    scenes = sm.get_scene_list()
+    if already_checked:
+        usable, tmp = video_path, None
+    else:
+        usable, tmp = _ensure_decodable(video_path)
+    try:
+        video = open_video(usable)
+        sm = SceneManager()
+        sm.add_detector(ContentDetector(threshold=threshold))
+        sm.detect_scenes(video)
+        scenes = sm.get_scene_list()
 
-    duration_ms = int(video.duration.get_seconds() * 1000) if video.duration else 0
+        duration_ms = int(video.duration.get_seconds() * 1000) if video.duration else 0
+    finally:
+        if tmp:
+            os.unlink(tmp)
 
     bounds = [(int(s.get_seconds() * 1000), int(e.get_seconds() * 1000)) for s, e in scenes]
     bounds = [(a, b) for a, b in bounds if b - a >= min_scene_duration * 1000]
@@ -220,6 +238,53 @@ def detect_scenes(
         bounds = folded
 
     return [{"start_ms": a, "end_ms": b} for a, b in bounds]
+
+
+def _ensure_decodable(video_path: str) -> tuple[str, str | None]:
+    """确认 cv2 能解码这个文件，不能则转码成 H.264 的临时副本。
+
+    返回 (可用路径, 需清理的临时路径或 None)。只试读一帧，成本可忽略。
+    转码用 libx264 + crf 28：检索只要画面内容，不需要保真度。
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(video_path)
+    ok = False
+    if cap.isOpened():
+        ok, _ = cap.read()
+    cap.release()
+    if ok:
+        return video_path, None
+
+    log.warning("cv2 解不了 %s，先转码成 H.264", video_path)
+    fd, tmp = tempfile.mkstemp(suffix=".mp4", prefix="videoseeker-transcode-")
+    os.close(fd)
+    proc = subprocess.run(
+        [
+            ffmpeg_bin(),
+            "-nostdin",
+            "-i",
+            video_path,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "28",
+            "-c:a",
+            "copy",
+            "-y",
+            tmp,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=3600,
+    )
+    if proc.returncode != 0 or not os.path.isfile(tmp):
+        if os.path.isfile(tmp):
+            os.unlink(tmp)
+        raise HTTPException(500, f"转码失败: {proc.stderr[-300:]}")
+    return tmp, tmp
 
 
 def extract_frame_at(video_path: str, timestamp_ms: int, out_path: str) -> str:
@@ -322,22 +387,30 @@ def process(req: ProcessRequest):
     out_dir = req.frames_out_dir or tempfile.mkdtemp(prefix="videoseeker-frames-")
     os.makedirs(out_dir, exist_ok=True)
 
-    scenes = detect_scenes(
-        req.video_path,
-        threshold=req.scene_threshold,
-        min_scene_duration=req.min_scene_duration,
-        max_scenes=req.max_scenes,
-    )
+    # 抽帧与场景检测要用同一份可解码副本：AV1 等编码会转码一次，
+    # 两处各转一遍等于双倍耗时。副本在 finally 里清。
+    usable, tmp = _ensure_decodable(req.video_path)
+    try:
+        scenes = detect_scenes(
+            usable,
+            threshold=req.scene_threshold,
+            min_scene_duration=req.min_scene_duration,
+            max_scenes=req.max_scenes,
+            already_checked=True,
+        )
 
-    frames: list[dict] = []
-    for i, sc in enumerate(scenes):
-        mid_ms = (sc["start_ms"] + sc["end_ms"]) // 2
-        out_path = os.path.join(out_dir, f"scene_{i:04d}_{mid_ms}.jpg")
-        try:
-            extract_frame_at(req.video_path, mid_ms, out_path)
-            frames.append({"scene_index": i, "timestamp_ms": mid_ms, "path": out_path})
-        except HTTPException:
-            continue
+        frames: list[dict] = []
+        for i, sc in enumerate(scenes):
+            mid_ms = (sc["start_ms"] + sc["end_ms"]) // 2
+            out_path = os.path.join(out_dir, f"scene_{i:04d}_{mid_ms}.jpg")
+            try:
+                extract_frame_at(usable, mid_ms, out_path)
+                frames.append({"scene_index": i, "timestamp_ms": mid_ms, "path": out_path})
+            except HTTPException:
+                continue
+    finally:
+        if tmp and os.path.isfile(tmp):
+            os.unlink(tmp)
 
     sentences: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="videoseeker-audio-") as td:
