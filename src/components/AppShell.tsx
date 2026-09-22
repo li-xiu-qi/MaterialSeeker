@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { QueuePanel } from '@/components/QueuePanel'
 
 /**
  * 应用外壳：左侧常驻导航 + 右侧主区。
@@ -12,10 +13,15 @@ import { usePathname } from 'next/navigation'
  * 二，顶栏页签会把「去另一边」降级成次级操作；
  * 三，后面还会长第四个入口，边栏不用为此重构。
  *
- * **侧边栏只做导航。** 检索范围（在哪个库里搜）不放这里：它是页面级参数，与
- * 「去哪个页面」不同级；而且它只对检索与素材库两页有意义，对入库页完全没用。
- * 放在边栏里它就和三个导航项抢注意力，用户还得先理解「这跟上面那三个不是一回事」。
- * 它现在由各页面自己的 CollectionScope 呈现。
+ * **侧边栏只放用户主动发起的入口。** 检索范围（在哪个库里搜）不放这里：它是
+ * 页面级参数，与「去哪个页面」不同级；而且它只对检索与素材库两页有意义，对
+ * 入库页完全没用。放在边栏里它就和三个导航项抢注意力，用户还得先理解「这跟
+ * 上面那三个不是一回事」。它现在由各页面自己的 CollectionScope 呈现。
+ *
+ * **例外是 QueuePanel（后台任务）。** 它不是入口，是「现在有事情在后台跑」的
+ * 常驻状态，和上面的规则不同级。放这里的理由恰恰相反：任务进度只存在于发起
+ * 它的那个页面，用户切走就看不见；而长任务等待期间去干点别的是正当需求，
+ * 不是异常路径。任务数不为零时它才出现，空闲不占侧边栏空间。
  *
  * 本文件是客户端组件，唯一的原因是要用 usePathname 高亮当前项。
  */
@@ -66,6 +72,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )
           })}
         </nav>
+
+        <QueuePanel />
       </aside>
 
       <main className="ml-60 min-w-0 flex-1 px-8 py-10">{children}</main>

@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server'
 import { createCollection, renameCollection } from '@/lib/collections'
+import { redirectBack } from '@/lib/redirect'
 
 export const runtime = 'nodejs'
 
@@ -26,17 +26,11 @@ export async function POST(req: Request) {
     if (id !== null) {
       if (!Number.isInteger(id) || id <= 0) throw new Error('非法 id')
       renameCollection(id, name)
-      const url = new URL(back, 'http://local')
-      url.searchParams.set('renamed', String(id))
-      return NextResponse.redirect(url, 303)
+return redirectBack(back, { 'renamed': String(id) })
     }
     const newId = createCollection(name)
-    const url = new URL(back, 'http://local')
-    url.searchParams.set('made', String(newId))
-    return NextResponse.redirect(url, 303)
+return redirectBack(back, { 'made': String(newId) })
   } catch (e) {
-    const url = new URL(back, 'http://local')
-    url.searchParams.set('cerr', e instanceof Error ? e.message : String(e))
-    return NextResponse.redirect(url, 303)
+return redirectBack(back, { 'cerr': e instanceof Error ? e.message : String(e) })
   }
 }

@@ -1,7 +1,8 @@
-import { getDb } from './db'
+import { getDb, embeddingToBlob } from './db'
 import type { Database } from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
+import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
 
 /**
  * 素材库（collection）的增删查与作用域。
@@ -388,4 +389,86 @@ export function scopeArgs(collectionId: number): number[] {
 export function scopeLabel(collectionId: number): string {
   if (collectionId === ALL_COLLECTIONS) return '全部库'
   return getCollection(collectionId)?.name ?? '默认库'
+}
+
+/**
+ * 改素材的标题与标注。**改标注必须重新编码，否则新描述搜不到。**
+ *
+ * 标注明明改了却没重编码，是那种不报错、只在检索时表现为「按新描述搜不到」
+ * 的失效：库里存的还是旧向量，用户看到描述已更新，会以为检索坏了。所以
+ * caption 一有变化就走编码服务，跟入库时同一条路（PASSAGE_INSTRUCTION）。
+ *
+ * 三类素材的可编辑面不一样，这是数据模型决定的，不是懒得做：
+ * - 图片：caption 存在 images.caption，配 images.caption_embedding，可改可重编码。
+ * - 文本：正文存在 text_notes.content，配 text_notes.embedding，同理。
+ * - 视频：没有「整片一个描述」这个字段。视频的描述在 frames.caption 上，是逐帧
+ *   的，改一个不影响其他帧，所以不支持整片批量改；帧描述在各帧上单独改。
+ *
+ * 返回实际改了什么，调用方据此给反馈，不要一律显示「已保存」。
+ */
+export async function updateAssetMeta(
+  id: number,
+  patch: { title?: string; caption?: string },
+): Promise<{ title: boolean; caption: boolean }> {
+  const db = getDb()
+  const row = db.prepare('SELECT kind FROM assets WHERE id = ?').get(id) as
+    | { kind: string }
+    | undefined
+  if (!row) throw new Error('素材不存在')
+
+  let titleChanged = false
+  let captionChanged = false
+
+  const nextTitle = patch.title?.trim()
+  if (nextTitle) {
+    db.prepare('UPDATE assets SET title = ? WHERE id = ?').run(nextTitle, id)
+    titleChanged = true
+  }
+
+  const nextCaption = patch.caption?.trim()
+  if (nextCaption !== undefined) {
+    if (row.kind === 'image') {
+      const cur = db.prepare('SELECT caption FROM images WHERE asset_id = ?').get(id) as
+        | { caption: string | null }
+        | undefined
+      if (!cur) throw new Error('图片记录缺失')
+      if ((cur.caption ?? '') !== nextCaption) {
+        // 空描述也要清掉向量：留着旧向量会让这条素材继续被旧描述命中
+        const vec = nextCaption
+          ? (await encodeBatch({
+              inputs: [{ modality: 'text', text: nextCaption, instruction: PASSAGE_INSTRUCTION }],
+            }))[0]
+          : null
+        db.prepare('UPDATE images SET caption = ?, caption_embedding = ? WHERE asset_id = ?').run(
+          nextCaption || null,
+          vec ? embeddingToBlob(vec) : null,
+          id,
+        )
+        captionChanged = true
+      }
+    } else if (row.kind === 'text') {
+      const cur = db.prepare('SELECT content FROM text_notes WHERE asset_id = ?').get(id) as
+        | { content: string }
+        | undefined
+      if (!cur) throw new Error('文本记录缺失')
+      if (cur.content !== nextCaption) {
+        if (!nextCaption) throw new Error('正文不能为空')
+        const vec = (
+          await encodeBatch({
+            inputs: [{ modality: 'text', text: nextCaption, instruction: PASSAGE_INSTRUCTION }],
+          })
+        )[0]
+        db.prepare('UPDATE text_notes SET content = ?, embedding = ? WHERE asset_id = ?').run(
+          nextCaption,
+          embeddingToBlob(vec),
+          id,
+        )
+        captionChanged = true
+      }
+    } else {
+      throw new Error('视频没有整片描述可改，帧描述请在关键帧上单独编辑')
+    }
+  }
+
+  return { title: titleChanged, caption: captionChanged }
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { TextIngestForm } from '@/components/TextIngestForm'
 import { UploadPanel } from '@/components/UploadPanel'
 import { listCollections, normalizeCollectionId, getCollection } from '@/lib/collections'
 
@@ -12,27 +13,51 @@ export const dynamic = 'force-dynamic'
  * 常驻占着首屏，检索结果反而被推到下面；而且视频处理期间页面一直是处理态，
  * 想顺手搜点什么就得等。分成两页各管一件事。
  *
- * 目标库从 URL 的 lib 参数来。上传走原生表单提交到 /api/ingest/form，
- * 服务端入库后重定向回本页并带上 ok/name/id/detail 或 err，所以**整条入库
- * 链路不依赖客户端 JS**：选文件、提交、看结果都不需要 hydration。JS 只是让
- * 「选完文件即提交」省掉一次点击，并给拖放与多文件用的。
+ * 目标库从 URL 的 lib 参数来。**整条入库链路不依赖客户端 JS**：有 JS 时
+ * UploadPanel 走 fetch，逐个文件报进度；没 JS 时原生表单（带 multiple）整页
+ * 提交，服务端一次收多个，入库后 redirect 回本页并带上 count/imgs/vids/fail
+ * 等汇总参数，由本页服务端渲染。JS 只是让进度更细、页面不刷新。
  */
 export default async function IngestPage({
   searchParams,
 }: {
   searchParams: Promise<{
     lib?: string
-    ok?: string
+    count?: string
+    imgs?: string
+    vids?: string
+    fail?: string
+    failDetail?: string
     name?: string
-    id?: string
-    detail?: string
     err?: string
+    textOk?: string
+    textTitle?: string
+    textId?: string
+    chars?: string
   }>
 }) {
-  const { lib, ok, name, id, detail, err } = await searchParams
+  const {
+    lib,
+    count,
+    imgs,
+    vids,
+    fail,
+    failDetail,
+    name,
+    err,
+    textOk,
+    textTitle,
+    textId,
+    chars,
+  } = await searchParams
   const collections = listCollections()
   const currentId = normalizeCollectionId(lib)
   const current = getCollection(currentId)
+
+  const imgN = Number(imgs) || 0
+  const vidN = Number(vids) || 0
+  const failN = Number(fail) || 0
+  const total = Number(count) || imgN + vidN
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -46,11 +71,38 @@ export default async function IngestPage({
           入库失败：{err}
         </p>
       )}
-      {ok && (
+
+      {total > 0 && (
+        <div
+          className={`mt-4 rounded-md border px-3 py-2 text-sm ${
+            failN > 0
+              ? 'border-amber-800 bg-amber-950/40 text-amber-200'
+              : 'border-emerald-800 bg-emerald-950/40 text-emerald-300'
+          }`}
+        >
+          <p>
+            已入库 {total} 个文件
+            {imgN > 0 && ` · 图片 ${imgN}`}
+            {vidN > 0 && ` · 视频 ${vidN}`}
+            {name ? `：${name}` : ''}
+          </p>
+          {failN > 0 && (
+            <p className="mt-1 text-[11px] text-amber-300/80">
+              有 {failN} 个没进去{failDetail ? `：${failDetail}` : ''}。文件若已落到素材目录，
+              可以重新选它再试。
+            </p>
+          )}
+          <Link href={`/?lib=${currentId}`} className="mt-1 inline-block text-[11px] underline">
+            去检索这个库
+          </Link>
+        </div>
+      )}
+
+      {textOk && (
         <div className="mt-4 rounded-md border border-emerald-800 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-300">
           <p>
-            {ok === 'image' ? '图片' : '视频'}「{name}」已入库（#{id}）
-            {detail ? ` · ${detail}` : ''}
+            文本「{textTitle}」已入库（#{textId}）
+            {chars ? ` · ${chars} 字` : ''}
           </p>
           <Link href={`/?lib=${currentId}`} className="mt-1 inline-block text-[11px] underline">
             去检索这个库
@@ -59,6 +111,17 @@ export default async function IngestPage({
       )}
 
       <UploadPanel
+        collections={collections.map((c) => ({ id: c.id, name: c.name }))}
+        currentCollectionId={currentId}
+      />
+
+      {/*
+        文本入库单独一张卡。**不是塞进上面那个上传面板里**：那边是「选文件」
+        的形态（点击、拖放、多选），文本没有文件，混在一起会让两种心智模型
+        挤在同一块区域。分成两张卡，各管一种输入形态。
+        原生表单提交，跟图片视频一样不依赖 JS。
+      */}
+      <TextIngestForm
         collections={collections.map((c) => ({ id: c.id, name: c.name }))}
         currentCollectionId={currentId}
       />

@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { copyAssets, getCollection } from '@/lib/collections'
+import { redirectBack } from '@/lib/redirect'
 
 export const runtime = 'nodejs'
 
@@ -24,9 +24,7 @@ export async function POST(req: Request) {
   const redirect = String(form.get('redirect') ?? '/library')
   const back = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/library'
   const fail = (msg: string) => {
-    const u = new URL(back, 'http://local')
-    u.searchParams.set('cerr', msg)
-    return NextResponse.redirect(u, 303)
+    return redirectBack(back, { 'cerr': msg })
   }
 
   if (ids.length === 0) return fail('没有选中任何素材')
@@ -40,7 +38,5 @@ export async function POST(req: Request) {
 
   if (copied === 0) return fail('没有素材被复制，选中的素材可能已不存在')
 
-  const u = new URL(back, 'http://local')
-  u.searchParams.set('copied', String(copied))
-  return NextResponse.redirect(u, 303)
+return redirectBack(back, { 'copied': String(copied) })
 }

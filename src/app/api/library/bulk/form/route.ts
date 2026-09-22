@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { removeAssetRecords } from '@/lib/collections'
+import { redirectBack } from '@/lib/redirect'
 
 export const runtime = 'nodejs'
 
@@ -25,9 +25,7 @@ export async function POST(req: Request) {
   const back = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/library'
 
   if (clean.length === 0) {
-    const u = new URL(back, 'http://local')
-    u.searchParams.set('cerr', '没有选中任何素材')
-    return NextResponse.redirect(u, 303)
+    return redirectBack(back, { 'cerr': '没有选中任何素材' })
   }
 
   const db = getDb()
@@ -39,7 +37,5 @@ export async function POST(req: Request) {
   })
   tx()
 
-  const u = new URL(back, 'http://local')
-  u.searchParams.set('bulkRemoved', String(rows.length))
-  return NextResponse.redirect(u, 303)
+return redirectBack(back, { 'bulkRemoved': String(rows.length) })
 }

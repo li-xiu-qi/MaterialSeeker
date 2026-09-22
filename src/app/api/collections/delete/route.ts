@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server'
 import { deleteCollection } from '@/lib/collections'
+import { redirectBack } from '@/lib/redirect'
 
 export const runtime = 'nodejs'
 
@@ -22,9 +22,7 @@ export async function POST(req: Request) {
   const next = String(form.get('next') ?? '/')
   const back = next.startsWith('/') && !next.startsWith('//') ? next : '/'
   const fail = (msg: string) => {
-    const url = new URL(back, 'http://local')
-    url.searchParams.set('cerr', msg)
-    return NextResponse.redirect(url, 303)
+    return redirectBack(back, { 'cerr': msg })
   }
 
   // 确认框没勾：不是「删失败」，是这一步不该发生，报错说清要做什么
@@ -32,9 +30,7 @@ export async function POST(req: Request) {
 
   try {
     deleteCollection(id)
-    const url = new URL(back, 'http://local')
-    url.searchParams.set('deleted', String(id))
-    return NextResponse.redirect(url, 303)
+return redirectBack(back, { 'deleted': String(id) })
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e))
   }

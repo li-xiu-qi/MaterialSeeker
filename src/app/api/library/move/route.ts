@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server'
 import { getDb } from '@/lib/db'
 import { moveAssets, getCollection } from '@/lib/collections'
+import { redirectBack } from '@/lib/redirect'
 
 export const runtime = 'nodejs'
 
@@ -23,9 +23,7 @@ export async function POST(req: Request) {
   const redirect = String(form.get('redirect') ?? '/library')
   const back = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/library'
   const fail = (msg: string) => {
-    const u = new URL(back, 'http://local')
-    u.searchParams.set('cerr', msg)
-    return NextResponse.redirect(u, 303)
+    return redirectBack(back, { 'cerr': msg })
   }
 
   if (ids.length === 0) return fail('没有选中任何素材')
@@ -40,7 +38,5 @@ export async function POST(req: Request) {
   // 搬了 0 条要说清原因，不能显示成功：最常见是选中的素材本来就在目标库里
   if (moved === 0) return fail('没有素材被移动，它们可能已经在目标素材库里了')
 
-  const u = new URL(back, 'http://local')
-  u.searchParams.set('moved', String(moved))
-  return NextResponse.redirect(u, 303)
+return redirectBack(back, { 'moved': String(moved) })
 }

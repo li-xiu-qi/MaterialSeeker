@@ -133,6 +133,30 @@ function initSchema(d: Database.Database) {
       name TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
+
+    -- 入库任务。视频入库是分钟级，不能再堵在 HTTP 请求里：提交后立刻返回
+    -- jobId，由一个后台队列逐个执行，前端轮询这里拿阶段与百分比。
+    -- status: queued / running / done / error / canceled
+    CREATE TABLE IF NOT EXISTS ingest_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('video','image')),
+      title TEXT NOT NULL,
+      file_path TEXT,
+      collection_id INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'queued',
+      stage TEXT NOT NULL DEFAULT 'queued',
+      percent INTEGER NOT NULL DEFAULT 0,
+      message TEXT NOT NULL DEFAULT '',
+      error TEXT,
+      result_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      started_at TEXT,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_jobs_batch ON ingest_jobs(batch_id, id);
+    CREATE INDEX IF NOT EXISTS idx_jobs_status ON ingest_jobs(status, id);
   `)
 
   // FTS5 与主表同步（external content 模式需手动维护）

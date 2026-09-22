@@ -16,10 +16,13 @@ export const dynamic = 'force-dynamic'
 
 export default async function ImageDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ edited?: string; cerr?: string }>
 }) {
   const { id } = await params
+  const { edited, cerr } = await searchParams
   const num = Number(id)
   if (!Number.isInteger(num) || num <= 0) notFound()
 
@@ -36,6 +39,67 @@ export default async function ImageDetailPage({
 
       <h1 className="mt-3 text-2xl font-semibold">{asset.title}</h1>
       <p className="mt-1 text-[11px] text-neutral-600">入库于 {asset.createdAt}</p>
+
+      {cerr && <p className="mt-3 text-[11px] text-red-400">{cerr}</p>}
+      {edited && (
+        <p className="mt-3 text-[11px] text-emerald-400">已保存，检索用的特征已同步更新</p>
+      )}
+
+      {/*
+        编辑标题与画面描述。**原生表单，不依赖 JS**：详情页本身是服务端直出
+        的，编辑没理由依赖 hydration。
+        描述一改就重编码（见 updateAssetMeta），否则库里存的是旧向量，表现为
+        「描述已更新但按新描述搜不到」，这种失效不报错，只在检索时显现。
+      */}
+      <details className="mt-4 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+        <summary className="cursor-pointer text-[11px] text-neutral-400 marker:content-none hover:text-neutral-200">
+          编辑标题与画面描述
+        </summary>
+        <form
+          action={`/api/library/${asset.id}/edit`}
+          method="post"
+          className="mt-3 space-y-3"
+        >
+          <input type="hidden" name="redirect" value={`/library/image/${asset.id}`} />
+
+          <div>
+            <label htmlFor="im-title" className="block text-[11px] text-neutral-500">
+              标题
+            </label>
+            <input
+              id="im-title"
+              name="title"
+              defaultValue={asset.title}
+              maxLength={120}
+              className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-neutral-500"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="im-caption" className="block text-[11px] text-neutral-500">
+              画面描述
+            </label>
+            <textarea
+              id="im-caption"
+              name="caption"
+              defaultValue={asset.caption ?? ''}
+              rows={4}
+              placeholder="描述这张图的内容，会影响按文字搜图的结果"
+              className="mt-1 w-full resize-y rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm leading-6 outline-none focus:border-neutral-500"
+            />
+            <p className="mt-1 text-[11px] text-neutral-700">
+              留空表示只有画面本身参与检索。保存后要重新计算描述的特征，会等一两秒。
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            className="rounded-md bg-neutral-100 px-4 py-2 text-xs font-medium text-neutral-900"
+          >
+            保存
+          </button>
+        </form>
+      </details>
 
       <div className="mt-6 grid gap-6 md:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="min-w-0">

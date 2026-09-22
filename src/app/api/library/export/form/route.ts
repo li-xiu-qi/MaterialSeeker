@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { redirectBack } from '@/lib/redirect'
 
 export const runtime = 'nodejs'
 
@@ -19,12 +19,8 @@ export async function POST(req: Request) {
   const ids = [...new Set(raw.map(Number))].filter((n) => Number.isInteger(n) && n > 0)
 
   if (ids.length === 0) {
-    const u = new URL('/library', 'http://local')
-    u.searchParams.set('cerr', '没有选中任何素材')
-    return NextResponse.redirect(u, 303)
+    return redirectBack('/library', { cerr: '没有选中任何素材' })
   }
 
-  const u = new URL('/api/library/export', 'http://local')
-  u.searchParams.set('ids', ids.join(','))
-  return NextResponse.redirect(u, 303)
+  return redirectBack('/api/library/export', { ids: ids.join(',') })
 }

@@ -13,9 +13,11 @@ ContentDetector 阈值 27.0、最短场景 5 秒、单视频场景上限 50，�
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import threading
 from typing import Any
 
 import logging
@@ -48,6 +50,56 @@ def ffmpeg_bin() -> str:
     if found:
         return found
     raise HTTPException(500, "ffmpeg not found；设 FFMPEG_BIN 指定路径")
+
+
+# ---------------------------------------------------------------- 进度上报
+#
+# /process 是分钟级任务，调用方（Node 侧）需要知道卡在哪一步。做法不是把任务
+# 改成异步轮询，而是在原有流程里每个阶段开始时更新一次进度字典，调用方按
+# job_id 轮询 GET /jobs/{job_id}/progress。进程退出即清零，任务本来也活不过
+# 进程退出，语义一致。
+#
+# 用锁是因为 uvicorn 默认线程池，两个 /process 并发时会同时写这个字典。
+
+_PROGRESS: dict[str, dict[str, Any]] = {}
+_PROGRESS_LOCK = threading.Lock()
+
+# 阶段顺序与权重。前端按权重把各阶段映射成一条百分比进度条，所以这里的顺序
+# 就是用户看到的顺序，不要为了省事把顺序打乱。
+PROGRESS_STAGES = [
+    "prepare",
+    "scenes",
+    "frames",
+    "audio",
+    "transcribe",
+]
+
+
+def _setp(job_id: str | None, stage: str, **extra: Any) -> None:
+    if not job_id:
+        return
+    with _PROGRESS_LOCK:
+        _PROGRESS[job_id] = {"stage": stage, **extra}
+        # 兜底防漏：调用方异常退出没来删条目时，字典不能无限长
+        if len(_PROGRESS) > 128:
+            for k in list(_PROGRESS)[: len(_PROGRESS) - 128]:
+                _PROGRESS.pop(k, None)
+
+
+def _clearp(job_id: str | None) -> None:
+    """清掉一个任务的进度。**由调用方在任务终态时调**，这里不自己清：
+    done 阶段要能被轮询到一次，否则调用方看到的最后一帧停在上一阶段。"""
+    if not job_id:
+        return
+    with _PROGRESS_LOCK:
+        _PROGRESS.pop(job_id, None)
+
+
+def _pstage(job_id: str | None) -> str | None:
+    if not job_id:
+        return None
+    with _PROGRESS_LOCK:
+        return _PROGRESS.get(job_id, {}).get("stage")
 
 
 # ---------------------------------------------------------------- 句合并（搬自 HearSight）
@@ -287,6 +339,25 @@ def _ensure_decodable(video_path: str) -> tuple[str, str | None]:
     return tmp, tmp
 
 
+def probe_duration_ms(path: str) -> int:
+    """读音视频时长（毫秒）。只为进度条提供参照，读不到就返回 0，不报错。"""
+    try:
+        proc = subprocess.run(
+            [ffmpeg_bin(), "-nostdin", "-i", path, "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        # ffmpeg 不给 json，时长在 stderr 的 Duration: HH:MM:SS.ss 里
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", proc.stderr or "")
+        if not m:
+            return 0
+        h, mi, s = (float(x) for x in m.groups())
+        return int(((h * 60 + mi) * 60 + s) * 1000)
+    except Exception:
+        return 0
+
+
 def extract_frame_at(video_path: str, timestamp_ms: int, out_path: str) -> str:
     """按时间戳抽单帧存 jpg。定位到最近关键帧（cv2 seek 的固有近似）。"""
     import cv2
@@ -351,6 +422,8 @@ class ProcessRequest(BaseModel):
     max_scenes: int = 50
     hotword: str = ""
     frames_out_dir: str | None = None
+    # 调用方的任务号。给了才会记录进度，调用方轮询 /jobs/{job_id}/progress 拿。
+    job_id: str | None = None
 
 
 @app.get("/health")
@@ -363,6 +436,25 @@ def health():
         "opencv": _module_version("opencv-python-headless") or _module_version("opencv-python"),
         "asr_loaded": _asr_model is not None,
     }
+
+
+@app.get("/jobs/{job_id}/progress")
+def job_progress(job_id: str):
+    """查一个 /process 的进度。没有这个 job_id 返回 404，调用方据此判断任务
+    是否已经结束（结束后进度会被清掉）。"""
+    with _PROGRESS_LOCK:
+        p = _PROGRESS.get(job_id)
+    if p is None:
+        raise HTTPException(404, f"no progress for {job_id}")
+    return p
+
+
+@app.delete("/jobs/{job_id}/progress")
+def job_progress_clear(job_id: str):
+    """任务终态时由调用方删掉进度条目。成功路径也会留一个 done 在这里，
+    不删就是常驻内存。"""
+    _clearp(job_id)
+    return {"ok": True}
 
 
 def _module_version(name: str) -> str | None:
@@ -380,6 +472,10 @@ def process(req: ProcessRequest):
 
     帧的向量编码不在这里做，由 Node 侧拿到帧路径后调 embedding 服务，
     保证编码入口只有一处。
+
+    进度：给了 job_id 就在每个阶段开始时记一次，调用方轮询
+    GET /jobs/{job_id}/progress。转写那一步内部再细分（秒/句），因为它是
+    全程最长的一段，不给细分的话进度条会长时间不动。
     """
     if not os.path.isfile(req.video_path):
         raise HTTPException(404, f"video not found: {req.video_path}")
@@ -387,10 +483,14 @@ def process(req: ProcessRequest):
     out_dir = req.frames_out_dir or tempfile.mkdtemp(prefix="videoseeker-frames-")
     os.makedirs(out_dir, exist_ok=True)
 
+    jid = req.job_id
+    _setp(jid, "prepare")
+
     # 抽帧与场景检测要用同一份可解码副本：AV1 等编码会转码一次，
     # 两处各转一遍等于双倍耗时。副本在 finally 里清。
     usable, tmp = _ensure_decodable(req.video_path)
     try:
+        _setp(jid, "scenes")
         scenes = detect_scenes(
             usable,
             threshold=req.scene_threshold,
@@ -401,6 +501,10 @@ def process(req: ProcessRequest):
 
         frames: list[dict] = []
         for i, sc in enumerate(scenes):
+            # 每帧一次太频繁，按约 5% 粒度报，最后一帧必报
+            step = max(1, len(scenes) // 20)
+            if i == 0 or (i + 1) % step == 0 or i == len(scenes) - 1:
+                _setp(jid, "frames", done=i + 1, total=len(scenes))
             mid_ms = (sc["start_ms"] + sc["end_ms"]) // 2
             out_path = os.path.join(out_dir, f"scene_{i:04d}_{mid_ms}.jpg")
             try:
@@ -415,16 +519,25 @@ def process(req: ProcessRequest):
     sentences: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="videoseeker-audio-") as td:
         wav = os.path.join(td, "audio.wav")
-        if extract_audio(req.video_path, wav):
+        audio = extract_audio(req.video_path, wav)
+        if audio:
+            # 转写是全程最长的一段，且内部拿不到细分进度（FunASR 一次 generate
+            # 跑完才返回）。把音频时长报出去，前端据此显示「音频 X 分 X 秒，
+            # 已等待 Y」——等待时间是真实流逝的，比一条不动的进度条可信。
+            _setp(jid, "transcribe", duration_ms=probe_duration_ms(audio))
             sentences = transcribe(wav, hotword=req.hotword)
 
-    return {
+    result = {
         "video_path": req.video_path,
         "scenes": scenes,
         "frames": frames,
         "sentences": sentences,
         "sentence_count": len(sentences),
     }
+    # 结果本身由 /process 的响应体返回，进度里不放，免得轮询接口把整份逐字稿
+    # 反复拉一遍。
+    _setp(jid, "done")
+    return result
 
 
 if __name__ == "__main__":

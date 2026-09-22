@@ -41,9 +41,29 @@ const LIST_CLS: Record<1 | 2 | 4, string> = {
   4: 'mt-3 grid grid-cols-4 gap-3',
 }
 
+/**
+ * 缩略图按栏数分级请求尺寸。缩略图不是请求越大越清晰，是「源图够铺满显示区域
+ * 就行」：二栏卡片内容宽约 409px，仍按单栏的 192px 请求会被拉成 2.2 倍放大，
+ * 肉眼可见地糊；四栏约 199px，192px 刚好不放大。所以一栏给 192（显示只有 128px），
+ * 二栏给 640，四栏给 384。
+ *
+ * 同样是字面量常量，理由同 LIST_CLS：构建时要能扫到具体值。
+ */
+const THUMB_W: Record<1 | 2 | 4, number> = {
+  1: 192,
+  2: 640,
+  4: 384,
+}
+const COVER_W: Record<1 | 2 | 4, number> = {
+  1: 256,
+  2: 640,
+  4: 384,
+}
+
 import { getLibraryList, filterLibraryList } from '@/lib/library'
 import { toMediaUrl, toThumbUrl } from '@/lib/media'
 import { LibraryDeleteButton } from '@/components/LibraryDeleteButton'
+import { LibraryEditButton } from '@/components/LibraryEditButton'
 import { CollectionScope } from '@/components/CollectionScope'
 import { CollectionMenu } from '@/components/CollectionMenu'
 import { BulkDeleteButton } from '@/components/BulkDeleteButton'
@@ -71,6 +91,39 @@ export const dynamic = 'force-dynamic'
 const PAGE = 24
 
 /**
+ * 一条素材的多选框。**只在多选态渲染，默认连 DOM 里都没有。**
+ *
+ * 用户抱怨了三次的是它的外观与位置：默认常驻时每张卡片角落一个白框，扫视
+ * 时全是噪点；多栏下还和操作按钮挤在同一行，那条行只有 57px 宽。所以改成由
+ * 「多选」入口带 ?select=1 才出现，退出多选即还原——URL 一切整页重出，选择态
+ * 自然清空，不需要额外的清除逻辑，也不需要客户端 state（本页其他控件也都走
+ * URL，JS 失效时多选照样可用）。
+ *
+ * 外观不沿用浏览器原生 checkbox：暗色页面上那是个不受主题控制的白框。
+ * appearance-none 去掉原生外观后自己画，选中填白并画一个勾（勾用 ::after
+ * 的 content 插，字面量写死，Tailwind 构建时才扫得到）。
+ */
+function AssetCheckbox({
+  name,
+  value,
+  title,
+}: {
+  name: string
+  value: number
+  title: string
+}) {
+  return (
+    <input
+      type="checkbox"
+      name={name}
+      value={value}
+      aria-label={`选择 ${title}`}
+      className="mt-1 h-4 w-4 flex-none cursor-pointer appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-neutral-100 checked:bg-neutral-100 checked:after:block checked:after:h-4 checked:after:w-4 checked:after:text-center checked:after:text-[10px] checked:after:leading-4 checked:after:text-neutral-900 checked:after:content-['✓']"
+    />
+  )
+}
+
+/**
  * 一组批量操作按钮。**靠 formaction 指向不同端点，复选框必须真的在这个 form 里。**
  *
  * 之前埋的坑：复选框放在列表里、按钮用 form 属性远程关联一个藏在页面底部的
@@ -81,18 +134,42 @@ const PAGE = 24
  *
  * 现在每组列表包一个真实 form，四个按钮用 formaction 各指各的端点，目标库
  * 下拉用 form 属性挂进同一个 form（它只归属一个 form，可以这么挂）。
+ *
+ * 多选态之外这里只剩一个「多选」入口：五个按钮加一个下拉在日常浏览时是纯噪音，
+ * 而它们每一刻都不能用（没有勾选对象）。要做的一张表也简单——非多选态不渲染
+ * 它们，多选态才出现，末尾给「完成」退出。
  */
 function BulkBar({
   formId,
   targets,
   currentId,
+  wide,
+  selecting,
+  enterHref,
+  exitHref,
 }: {
   formId: string
   targets: Array<{ id: number; name: string }>
   currentId: number
+  /** 单栏为 true。多栏时复选框被提到卡片左上角，提示文案要跟着改 */
+  wide: boolean
+  /** 是否处于多选态 */
+  selecting: boolean
+  enterHref: string
+  exitHref: string
 }) {
   const btn =
     'rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
+  if (!selecting) {
+    return (
+      <Link
+        href={enterHref}
+        className="rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+      >
+        多选
+      </Link>
+    )
+  }
   return (
     <div className="flex flex-wrap items-center gap-2">
       <select
@@ -140,7 +217,12 @@ function BulkBar({
       >
         删除所选
       </button>
-      <span className="text-[11px] text-neutral-700">勾选左侧方框</span>
+      <Link href={exitHref} className={btn}>
+        完成
+      </Link>
+      <span className="text-[11px] text-neutral-700">
+        {wide ? '勾选左侧方框' : '勾选卡片左上角'}
+      </span>
     </div>
   )
 }
@@ -161,6 +243,7 @@ export default async function LibraryPage({
     moved?: string
     copied?: string
     cerr?: string
+    select?: string
   }>
 }) {
   const {
@@ -176,6 +259,7 @@ export default async function LibraryPage({
     moved: movedCount,
     copied: copiedCount,
     cerr,
+    select,
   } = await searchParams
   const collectionId = normalizeCollectionId(lib)
   const shown = Math.max(PAGE, Math.min(Number(img) || PAGE, 400))
@@ -205,11 +289,21 @@ export default async function LibraryPage({
   /** 单栏时卡片是横排（缩略图在左），多栏时改竖排，否则窄栏里图和字挤在一起 */
   const wide = cols === 1
   const listCls = LIST_CLS[cols]
+  /**
+   * 多选态。**只认字面量 '1'，任何其他值（含空串）都是浏览态。**
+   * 这样退出只需把参数拿掉，不存在「=0 也算开」的歧义。
+   */
+  const selecting = select === '1'
+  /** 给站内链接挂上多选态：栏数、类型、批量操作回跳都要带，否则一步就退出多选 */
+  const withSelect = (href: string) =>
+    selecting ? `${href}${href.includes('?') ? '&' : '?'}select=1` : href
   // 批量操作完成后回到当前视图：栏数、筛选、已加载条数都要带上，否则用户
-  // 在多栏状态下操作完被弹回单栏首页。
-  const backHref = `/library?lib=${libQ}&k=${kind ?? 'all'}&kw=${encodeURIComponent(
-    keyword,
-  )}&c=${cols}${shown > PAGE ? `&img=${shown}` : ''}`
+  // 在多栏状态下操作完被弹回单栏首页。多选态也要带，否则删完一批就得再点一次「多选」。
+  const backHref = withSelect(
+    `/library?lib=${libQ}&k=${kind ?? 'all'}&kw=${encodeURIComponent(
+      keyword,
+    )}&c=${cols}${shown > PAGE ? `&img=${shown}` : ''}`,
+  )
   /** 栏数切换时要一并带上的参数：丢了 img 会把已加载的图缩回首页 */
   const keepForCols = new URLSearchParams({
     lib: libQ,
@@ -217,6 +311,9 @@ export default async function LibraryPage({
     kw: keyword,
     ...(shown > PAGE ? { img: String(shown) } : {}),
   })
+  /** 多选入口与退出。exit 刻意不加 select：它要的正是「把参数拿掉」的那个链接 */
+  const enterSelectHref = `/library?${keepForCols.toString()}&select=1`
+  const exitSelectHref = `/library?${keepForCols.toString()}`
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -259,6 +356,7 @@ export default async function LibraryPage({
               : (all.find((c) => c.id === collectionId)?.name ?? null)
           }
           isDefault={all.some((c) => c.id === collectionId && c.id === 1)}
+          assetCount={data.counts.video + data.counts.image + data.counts.text}
         />
       </div>
 
@@ -275,7 +373,7 @@ export default async function LibraryPage({
             return (
               <Link
                 key={o.value}
-                href={`/library?${href.toString()}`}
+                href={withSelect(`/library?${href.toString()}`)}
                 className={`rounded border px-2 py-0.5 text-[11px] transition ${
                   active
                     ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
@@ -294,7 +392,9 @@ export default async function LibraryPage({
             return (
               <Link
                 key={f.value}
-                href={`/library?lib=${libQ}&k=${f.value}&kw=${encodeURIComponent(keyword)}`}
+                href={withSelect(
+                  `/library?lib=${libQ}&k=${f.value}&kw=${encodeURIComponent(keyword)}`,
+                )}
                 className={`rounded border px-2 py-0.5 text-[11px] transition ${
                   active
                     ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
@@ -311,6 +411,7 @@ export default async function LibraryPage({
       <form action="/library" method="get" className="mt-3 flex gap-2">
         <input type="hidden" name="lib" value={libQ} />
         <input type="hidden" name="k" value={kind ?? 'all'} />
+        {selecting && <input type="hidden" name="select" value="1" />}
         <input
           name="kw"
           defaultValue={keyword}
@@ -337,7 +438,15 @@ export default async function LibraryPage({
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">视频</h2>
           {data.video.length > 0 && (
-            <BulkBar formId="bulk-video" targets={collections} currentId={collectionId} />
+            <BulkBar
+              formId="bulk-video"
+              targets={collections}
+              currentId={collectionId}
+              wide={wide}
+              selecting={selecting}
+              enterHref={enterSelectHref}
+              exitHref={exitSelectHref}
+            />
           )}
         </div>
         {data.video.length === 0 ? (
@@ -355,46 +464,114 @@ export default async function LibraryPage({
             <input type="hidden" name="redirect" value={backHref} />
             <ul className={listCls}>
               {data.video.map((v) => {
-                const cover = toThumbUrl(v.cover, 320)
+                const cover = toThumbUrl(v.cover, COVER_W[cols])
                 return (
                   <li
                     key={v.id}
-                    className="rounded-md border border-neutral-800 bg-neutral-900/60 p-4"
+                    className={
+                      wide
+                        ? 'rounded-md border border-neutral-800 bg-neutral-900/60 p-4'
+                        : 'flex flex-col rounded-md border border-neutral-800 bg-neutral-900/60 p-2'
+                    }
                   >
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        name="video"
-                        value={v.id}
-                        className="mt-1 h-4 w-4 flex-none accent-neutral-100"
-                        aria-label={`选择 ${v.title}`}
-                      />
-                      <Link
-                        href={`/library/video/${v.id}`}
-                        className="flex min-w-0 flex-1 items-start gap-3"
+                    {/*
+                      多选态才渲染这一行。浏览态连 input 都不进 DOM：用户三次抱怨
+                      每张卡片角落一个白框是噪音，而它在没有勾选对象时也确实没用。
+                      单栏时操作按钮原本和复选框挤在同一行，浏览态挪到右侧独立一行。
+                    */}
+                    {selecting ? (
+                      <div
+                        className={
+                          wide
+                            ? 'flex items-start gap-3'
+                            : 'mb-1.5 flex items-center justify-between gap-1.5'
+                        }
                       >
-                        {cover ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={cover}
-                            alt=""
-                            className="h-20 w-36 flex-none rounded border border-neutral-800 object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="h-20 w-36 flex-none rounded border border-neutral-800 bg-neutral-800" />
+                        <AssetCheckbox name="video" value={v.id} title={v.title} />
+                        {!wide && (
+                          <span className="flex flex-none items-center gap-1">
+                            <LibraryEditButton
+                              id={v.id}
+                              kind="video"
+                              title={v.title}
+                              annotation=""
+                              annotationLabel=""
+                            />
+                            <LibraryDeleteButton id={v.id} title={v.title} />
+                          </span>
                         )}
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm text-neutral-200">
-                            {v.title}
+                      </div>
+                    ) : (
+                      !wide && (
+                        <div className="mb-1.5 flex items-center justify-end gap-1">
+                          <span className="flex flex-none items-center gap-1">
+                            <LibraryEditButton
+                              id={v.id}
+                              kind="video"
+                              title={v.title}
+                              annotation=""
+                              annotationLabel=""
+                            />
+                            <LibraryDeleteButton id={v.id} title={v.title} />
                           </span>
-                          <span className="mt-1 block text-[11px] text-neutral-600">
-                            {v.sentences} 句 · {v.chunks} 块 · {v.frames} 帧 · 查看逐字稿与关键帧
-                          </span>
+                        </div>
+                      )
+                    )}
+                    <Link
+                      href={`/library/video/${v.id}`}
+                      className={wide ? 'flex min-w-0 flex-1 items-start gap-3' : 'block min-w-0'}
+                    >
+                      {cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={cover}
+                          alt=""
+                          className={
+                            wide
+                              ? 'h-20 w-36 flex-none rounded border border-neutral-800 object-cover'
+                              : 'aspect-video w-full rounded border border-neutral-800 object-cover'
+                          }
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div
+                          className={
+                            wide
+                              ? 'h-20 w-36 flex-none rounded border border-neutral-800 bg-neutral-800'
+                              : 'aspect-video w-full rounded border border-neutral-800 bg-neutral-800'
+                          }
+                        >
+                          无封面
+                        </div>
+                      )}
+                      <span className={wide ? 'min-w-0 flex-1' : 'mt-1.5 block min-w-0'}>
+                        <span className="block truncate text-sm text-neutral-200">{v.title}</span>
+                        {/*
+                          「N 句 · N 块 · N 帧」在窄栏里会被拆成一个数字一行，卡片
+                          高度失控（实测 354px）。多栏时只留最有信息量的一句，要看
+                          全的去详情页。
+                        */}
+                        <span className="mt-1 block text-[11px] text-neutral-600">
+                          {wide ? (
+                            `${v.sentences} 句 · ${v.chunks} 块 · ${v.frames} 帧 · 查看逐字稿与关键帧`
+                          ) : (
+                            <span className="block truncate">{v.sentences} 句 · 查看逐字稿</span>
+                          )}
                         </span>
-                      </Link>
-                      <LibraryDeleteButton id={v.id} title={v.title} />
-                    </div>
+                      </span>
+                    </Link>
+                    {wide && (
+                      <span className="flex flex-none items-center gap-1.5">
+                        <LibraryEditButton
+                          id={v.id}
+                          kind="video"
+                          title={v.title}
+                          annotation=""
+                          annotationLabel=""
+                        />
+                        <LibraryDeleteButton id={v.id} title={v.title} />
+                      </span>
+                    )}
                   </li>
                 )
               })}
@@ -407,7 +584,15 @@ export default async function LibraryPage({
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">图片</h2>
           {images.length > 0 && (
-            <BulkBar formId="bulk-image" targets={collections} currentId={collectionId} />
+            <BulkBar
+              formId="bulk-image"
+              targets={collections}
+              currentId={collectionId}
+              wide={wide}
+              selecting={selecting}
+              enterHref={enterSelectHref}
+              exitHref={exitSelectHref}
+            />
           )}
         </div>
         {images.length === 0 ? (
@@ -423,50 +608,123 @@ export default async function LibraryPage({
             <input type="hidden" name="redirect" value={backHref} />
             <ul className={listCls}>
               {images.map((im) => {
-                const thumb = toThumbUrl(im.mediaPath, wide ? 192 : 320)
+                const thumb = toThumbUrl(im.mediaPath, THUMB_W[cols])
+                const thumbCls = wide
+                  ? 'h-24 w-32 flex-none rounded border border-neutral-800 object-cover'
+                  : 'aspect-[4/3] w-full rounded border border-neutral-800 object-cover'
                 return (
                   <li
                     key={im.id}
-                    className="rounded-md border border-neutral-800 bg-neutral-900/60 p-4"
+                    className={
+                      wide
+                        ? 'rounded-md border border-neutral-800 bg-neutral-900/60 p-4'
+                        : 'flex flex-col rounded-md border border-neutral-800 bg-neutral-900/60 p-2'
+                    }
                   >
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        name="image"
-                        value={im.id}
-                        className="mt-1 h-4 w-4 flex-none accent-neutral-100"
-                        aria-label={`选择 ${im.title}`}
-                      />
-                      <Link
-                        href={`/library/image/${im.id}`}
-                        className="flex min-w-0 flex-1 items-start gap-3"
+                    {/*
+                      多栏时把复选框与操作按钮提到卡片顶部一行。这是踩过之后才这么
+                      摆的：第一版把它们留在原来的位置（竖排后就在图下面），结果
+                      复选框和按钮被缩略图挤成一条 57px 宽的竖线，整张卡片高 292px，
+                      四栏一屏只能看两三张。列宽是从 DOM 量出来的（215px），不是猜的。
+
+                      现在整行只在多选态出现（理由见视频组），浏览态操作按钮独立成行。
+                    */}
+                    {selecting ? (
+                      <div
+                        className={
+                          wide
+                            ? 'flex items-start gap-3'
+                            : 'mb-1.5 flex items-center justify-between gap-1.5'
+                        }
                       >
-                        {thumb ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={thumb}
-                            alt={im.caption ?? ''}
-                            className="h-24 w-32 flex-none rounded border border-neutral-800 object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="h-24 w-32 flex-none rounded border border-neutral-800 bg-neutral-800" />
+                        <AssetCheckbox name="image" value={im.id} title={im.title} />
+                        {!wide && (
+                          <span className="flex flex-none items-center gap-1">
+                            <LibraryEditButton
+                              id={im.id}
+                              kind="image"
+                              title={im.title}
+                              annotation={im.caption ?? ''}
+                              annotationLabel="画面描述"
+                            />
+                            <LibraryDeleteButton id={im.id} title={im.title} />
+                          </span>
                         )}
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm text-neutral-200">
-                            {im.title}
+                      </div>
+                    ) : (
+                      !wide && (
+                        <div className="mb-1.5 flex items-center justify-end gap-1">
+                          <span className="flex flex-none items-center gap-1">
+                            <LibraryEditButton
+                              id={im.id}
+                              kind="image"
+                              title={im.title}
+                              annotation={im.caption ?? ''}
+                              annotationLabel="画面描述"
+                            />
+                            <LibraryDeleteButton id={im.id} title={im.title} />
                           </span>
-                          <span className="mt-1 block text-[11px] text-neutral-400">
-                            {im.caption ?? '（无说明）'}
-                          </span>
-                          <span className="mt-1 block text-[11px] text-neutral-600">
-                            {im.hasVector ? '可检索' : '暂不可检索'}
-                            {im.hasCaptionVector ? ' · 可按描述搜索' : ''} · 查看大图与相似素材
-                          </span>
+                        </div>
+                      )
+                    )}
+                    <Link
+                      href={`/library/image/${im.id}`}
+                      className={wide ? 'flex min-w-0 flex-1 items-start gap-3' : 'block min-w-0'}
+                    >
+                      {thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={thumb}
+                          alt={im.caption ?? ''}
+                          className={thumbCls}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div
+                          className={
+                            wide
+                              ? 'h-24 w-32 flex-none rounded border border-neutral-800 bg-neutral-800'
+                              : 'aspect-[4/3] w-full rounded border border-neutral-800 bg-neutral-800'
+                          }
+                        >
+                          无预览
+                        </div>
+                      )}
+                      <span className={wide ? 'min-w-0 flex-1' : 'mt-1.5 block min-w-0'}>
+                        <span className="block truncate text-sm text-neutral-200">{im.title}</span>
+                        {/*
+                          描述在两栏与四栏都锁两行：一栏给足空间可以全展示，窄栏全
+                          展示会把卡片撑到老长，扫视时反而看不清。截断用 line-clamp，
+                          不用 truncate（后者只断一行）。
+                        */}
+                        <span
+                          className={
+                            wide
+                              ? 'mt-1 block text-[11px] text-neutral-400'
+                              : 'mt-0.5 block text-[11px] leading-4 text-neutral-400 line-clamp-2'
+                          }
+                        >
+                          {im.caption ?? '（无说明）'}
                         </span>
-                      </Link>
-                      <LibraryDeleteButton id={im.id} title={im.title} />
-                    </div>
+                        <span className="mt-1 block text-[11px] text-neutral-600">
+                          {im.hasVector ? '可检索' : '暂不可检索'}
+                          {im.hasCaptionVector && wide ? ' · 可按描述搜索' : ''}
+                          {!wide && ' · 查看大图与相似素材'}
+                        </span>
+                      </span>
+                    </Link>
+                    {wide && (
+                      <span className="flex flex-none items-center gap-1.5">
+                        <LibraryEditButton
+                          id={im.id}
+                          kind="image"
+                          title={im.title}
+                          annotation={im.caption ?? ''}
+                          annotationLabel="画面描述"
+                        />
+                        <LibraryDeleteButton id={im.id} title={im.title} />
+                      </span>
+                    )}
                   </li>
                 )
               })}
@@ -489,7 +747,15 @@ export default async function LibraryPage({
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">文本</h2>
           {data.text.length > 0 && (
-            <BulkBar formId="bulk-text" targets={collections} currentId={collectionId} />
+            <BulkBar
+              formId="bulk-text"
+              targets={collections}
+              currentId={collectionId}
+              wide={wide}
+              selecting={selecting}
+              enterHref={enterSelectHref}
+              exitHref={exitSelectHref}
+            />
           )}
         </div>
         {data.text.length === 0 ? (
@@ -507,23 +773,37 @@ export default async function LibraryPage({
               {data.text.map((t) => (
                 <li
                   key={t.id}
-                  className="rounded-md border border-neutral-800 bg-neutral-900/60 p-4"
+                  className={
+                    wide
+                      ? 'rounded-md border border-neutral-800 bg-neutral-900/60 p-4'
+                      : 'flex flex-col rounded-md border border-neutral-800 bg-neutral-900/60 p-2'
+                  }
                 >
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      name="text"
-                      value={t.id}
-                      className="h-4 w-4 flex-none accent-neutral-100"
-                      aria-label={`选择 ${t.title}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-neutral-200">{t.title}</p>
+                  <div className={wide ? 'flex items-center gap-3' : 'flex flex-col gap-1.5'}>
+                    {selecting && <AssetCheckbox name="text" value={t.id} title={t.title} />}
+                    <Link
+                      href={`/library/text/${t.id}`}
+                      className="min-w-0 flex-1 hover:underline"
+                      title="查看与编辑这段文本"
+                    >
+                      <p className={wide ? 'truncate text-sm text-neutral-200' : 'text-sm leading-5 text-neutral-200 line-clamp-2'}>
+                        {t.title}
+                      </p>
                       <p className="mt-1 text-[11px] text-neutral-600">
                         {t.chars} 字 · {t.hasVector ? '可检索' : '暂不可检索'}
+                        {wide ? ' · 查看与编辑' : ''}
                       </p>
-                    </div>
-                    <LibraryDeleteButton id={t.id} title={t.title} />
+                    </Link>
+                    <span className="flex flex-none items-center gap-1.5">
+                      <LibraryEditButton
+                        id={t.id}
+                        kind="text"
+                        title={t.title}
+                        annotation={t.content ?? ''}
+                        annotationLabel="正文"
+                      />
+                      <LibraryDeleteButton id={t.id} title={t.title} />
+                    </span>
                   </div>
                 </li>
               ))}

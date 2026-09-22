@@ -25,10 +25,10 @@ export default async function VideoDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ t?: string; lib?: string }>
+  searchParams: Promise<{ t?: string; lib?: string; edited?: string; cerr?: string }>
 }) {
   const { id } = await params
-  const { t, lib } = await searchParams
+  const { t, lib, edited, cerr } = await searchParams
   const num = Number(id)
   if (!Number.isInteger(num) || num <= 0) notFound()
 
@@ -54,6 +54,52 @@ export default async function VideoDetailPage({
       </div>
 
       <h1 className="mt-3 text-2xl font-semibold">{asset.title}</h1>
+
+      {cerr && <p className="mt-2 text-[11px] text-red-400">{cerr}</p>}
+      {edited && (
+        <p className="mt-2 text-[11px] text-emerald-400">已保存，检索用的特征已同步更新</p>
+      )}
+
+      {/*
+        只改标题。**视频没有「整片一个描述」这个字段**：视频的描述在
+        frames.caption 上，是逐帧的，改一个不影响其他帧。所以这里不给
+        「视频描述」输入框，给了反而是假的（存不进去，或在库里造一个检索
+        不到的字段）。帧描述在各帧上单独改。
+      */}
+      <details className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+        <summary className="cursor-pointer text-[11px] text-neutral-400 marker:content-none hover:text-neutral-200">
+          编辑标题
+        </summary>
+        <form
+          action={`/api/library/${asset.id}/edit`}
+          method="post"
+          className="mt-3 flex flex-wrap items-end gap-2"
+        >
+          <input
+            type="hidden"
+            name="redirect"
+            value={`/library/video/${asset.id}${lib ? `?lib=${lib}` : ''}`}
+          />
+          <div>
+            <label htmlFor="vd-title" className="block text-[11px] text-neutral-500">
+              标题
+            </label>
+            <input
+              id="vd-title"
+              name="title"
+              defaultValue={asset.title}
+              maxLength={120}
+              className="mt-1 w-56 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm outline-none focus:border-neutral-500"
+            />
+          </div>
+          <button
+            type="submit"
+            className="rounded-md bg-neutral-100 px-4 py-2 text-xs font-medium text-neutral-900"
+          >
+            保存
+          </button>
+        </form>
+      </details>
 
       <div className="mt-6">
         <VideoTranscriptPanel

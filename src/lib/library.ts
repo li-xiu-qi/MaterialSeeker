@@ -33,6 +33,17 @@ export interface ImageDetail {
   }>
 }
 
+export interface TextDetail {
+  asset: {
+    id: number
+    title: string
+    createdAt: string
+    content: string
+    chars: number
+    hasVector: boolean
+  }
+}
+
 export interface VideoDetail {
   asset: {
     id: number
@@ -103,6 +114,8 @@ export interface LibraryList {
     title: string
     createdAt: string
     chars: number
+    /** 正文全文。列表里的内联编辑要拿它预填，见 getLibraryList 里同款注释 */
+    content: string
     hasVector: boolean
     collectionId: number
     collectionName: string
@@ -174,7 +187,7 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
   const text = db
     .prepare(
       `SELECT a.id, a.title, a.created_at, a.collection_id,
-              c.name AS collection_name, length(n.content) AS chars,
+              c.name AS collection_name, n.content, length(n.content) AS chars,
               (n.embedding IS NOT NULL) AS has_vec
        FROM assets a JOIN text_notes n ON n.asset_id = a.id
        JOIN collections c ON c.id = a.collection_id
@@ -184,6 +197,7 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
     id: number
     title: string
     created_at: string
+    content: string
     chars: number
     has_vec: number
     collection_id: number
@@ -228,6 +242,9 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
       title: t.title,
       createdAt: t.created_at,
       chars: t.chars,
+      // 列表里的内联编辑要拿现有正文预填。**不传的代价是用户一保存就把正文
+      // 清空**：空串与「没改」在 PATCH 里不是一回事，见 LibraryEditButton。
+      content: t.content,
       hasVector: Boolean(t.has_vec),
     })),
   }
@@ -525,5 +542,42 @@ export function filterLibraryList(list: LibraryList, filter: LibraryFilter): Lib
         ? []
         : list.image.filter((im) => keep(im.title, im.caption)),
     text: filter.kind && filter.kind !== 'text' ? [] : list.text.filter((t) => keep(t.title, null)),
+  }
+}
+
+/**
+ * 文本素材详情。图片和视频早就有详情页，**文本一直没有，列表里也点不开**，
+ * 于是用户入库的文本除了标题和字数，内容本身在界面上看不到，也无法编辑。
+ * 这不只是少一个页面：文本的可编辑字段就是正文，没有详情页就没有编辑它的
+ * 地方，只能改数据库。
+ */
+export function getTextDetail(id: number): TextDetail | null {
+  const db = getDb()
+  const row = db
+    .prepare(
+      `SELECT a.id, a.title, a.created_at, n.content, n.embedding
+       FROM assets a JOIN text_notes n ON n.asset_id = a.id WHERE a.id = ?`,
+    )
+    .get(id) as
+    | {
+        id: number
+        title: string
+        created_at: string
+        content: string
+        embedding: Buffer | null
+      }
+    | undefined
+
+  if (!row) return null
+
+  return {
+    asset: {
+      id: row.id,
+      title: row.title,
+      createdAt: row.created_at,
+      content: row.content,
+      chars: row.content.length,
+      hasVector: Boolean(row.embedding),
+    },
   }
 }
