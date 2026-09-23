@@ -68,7 +68,28 @@ export interface ImageHit {
 
 export type SearchHit = ChunkHit | FrameHit | ImageHit
 
-const TOP_K_PER_ROUTE = 20
+/**
+ * 每一路至少给这么多。**搜索分页靠它穿透。**
+ *
+ * 原来是写死的 20，而四路等权合并后总 topK 默认只有 30，于是「加载更多」翻不出
+ * 东西：三类各 20 条候选，合并去重后通常已经不足 30。现在每路的下界跟着调用方的
+ * topK 走，翻页请求 topK=48 时每路真的会给出 48 条候选。
+ *
+ * 仍然留下界：不传 topK 的调用方（脚本、将来的新页面）拿到的是合理的一批，
+ * 不是全表。
+ */
+const MIN_PER_ROUTE = 20
+
+/**
+ * 每路的实际上限。取 topK 与下界的较大值。
+ *
+ * 代价要说清楚：逐字稿那一路每命中一个 chunk 都要另跑一次句子查询（拼句级跳转用），
+ * 所以这个数直接是句子查询的次数。放到 48 条时是 48 次查询，比 20 次多但仍是
+ * 微秒级；真正的成本在余弦扫描，那个与这个数无关，全表已经算完了。
+ */
+function perRoute(topK: number): number {
+  return Math.max(MIN_PER_ROUTE, topK)
+}
 
 export async function search(
   query: string,
@@ -76,6 +97,7 @@ export async function search(
 ): Promise<SearchHit[]> {
   const modality = opts.modality ?? 'all'
   const topK = opts.topK ?? 30
+  const perRouteK = perRoute(topK)
   // 检索作用域。不给就是默认库，不是全库——全库检索在素材多起来之后只有
   // 变慢一条路，而作用域应该是显式选择而不是默认行为。
   const collectionId = opts.collectionId ?? DEFAULT_COLLECTION_ID
@@ -115,7 +137,7 @@ export async function search(
     const scored = rows
       .map((r) => ({ r, score: cosineSim(qVec, blobToEmbedding(r.embedding)) }))
       .sort((a, b) => b.score - a.score)
-      .slice(0, TOP_K_PER_ROUTE)
+      .slice(0, perRouteK)
 
     for (const { r, score } of scored) {
       const sents = db
@@ -169,7 +191,7 @@ export async function search(
       ])
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, TOP_K_PER_ROUTE)
+      .slice(0, perRouteK)
 
     for (const s of frameScored) {
       hits.push({
@@ -261,7 +283,7 @@ export async function search(
            WHERE chunks_fts MATCH ? ${scope}
            ORDER BY rank LIMIT ?`,
         )
-        .all(ftsQuery, ...scopeArg, TOP_K_PER_ROUTE) as Array<{
+        .all(ftsQuery, ...scopeArg, perRouteK) as Array<{
         id: number
         text: string
         start_ms: number

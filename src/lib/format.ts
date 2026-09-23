@@ -4,9 +4,15 @@
  * Turbopack 直接 panic。
  */
 
-/** 毫秒 → m:ss */
+/**
+ * 毫秒 → m:ss。
+ *
+ * 负值按 0 处理。毫秒字段来自数据库，正常不会为负，但这个函数被逐字稿、
+ * 关键帧、结果卡片三处展示共用，任何一个上游算出负差值都会让它把
+ * `-1:-1` 这样的东西直接摆到界面上。展示函数的契约是自己不产出怪东西。
+ */
 export function fmtMs(ms: number): string {
-  const total = Math.floor(ms / 1000)
+  const total = Math.floor(Math.max(0, ms) / 1000)
   const m = Math.floor(total / 60)
   const s = total % 60
   return `${m}:${String(s).padStart(2, '0')}`

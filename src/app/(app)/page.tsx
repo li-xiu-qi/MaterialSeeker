@@ -1,6 +1,8 @@
+import { RECENT_LIMIT } from '@/lib/recent'
+import { RESULT_PAGE, MAX_RESULT_SHOWN, resultParams } from '@/lib/searchPaging'
 import Link from 'next/link'
 import { search } from '@/lib/search'
-import { getRecentAssets, getLibraryList, type RecentAsset } from '@/lib/library'
+import { getRecentAssets, getLibraryCounts, type RecentAsset } from '@/lib/library'
 import {
   listCollections,
   normalizeCollectionId,
@@ -58,6 +60,11 @@ function libParam(collectionId: number): string {
   return collectionId === ALL_COLLECTIONS ? 'all' : String(collectionId)
 }
 
+/** 作用域写成 URL 参数。全部态必须是 all，写 0 会被当成非法值回落成默认库 */
+function libQForResult(collectionId: number): string {
+  return collectionId === ALL_COLLECTIONS ? 'all' : String(collectionId)
+}
+
 function seekHref(assetId: number, collectionId: number, startMs: number): string {
   return `/library/video/${assetId}?t=${Math.floor(startMs / 1000)}&lib=${libParam(collectionId)}`
 }
@@ -68,12 +75,21 @@ const KIND_LABEL: Record<RecentAsset['kind'], string> = {
   text: '文本',
 }
 
+
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; m?: string; lib?: string; made?: string; cerr?: string }>
+  searchParams: Promise<{
+    q?: string
+    m?: string
+    lib?: string
+    /** 已显示的结果条数，翻页用 */
+    s?: string
+    made?: string
+    cerr?: string
+  }>
 }) {
-  const { q, m, lib, made, cerr } = await searchParams
+  const { q, m, lib, s, made, cerr } = await searchParams
   const collectionId = normalizeCollectionId(lib)
   const all = listCollections()
   const collections = all.map((c) => ({ id: c.id, name: c.name }))
@@ -90,12 +106,25 @@ export default async function HomePage({
   let items: ResultItem[] = []
   let error: string | null = null
   let hitCount = 0
+  // **已显示条数。** 从 URL 来，不用客户端 state：翻页是换一批结果，与「检索」一样
+  // 该是能分享、能刷新的链接。
+  const shown = Math.max(
+    RESULT_PAGE,
+    Math.min(Number(s) || RESULT_PAGE, MAX_RESULT_SHOWN),
+  )
+  // 翻页链接要带的当前态。在 query 与 modality 都定下来之后算，缺一个都不行。
+  // 用现成的纯函数拼，不在页面里手写模板串——手写串漏一个参数不会报错，
+  // 只会让翻页后搜索词或类型筛选悄悄没了。
+  const resultParamsForPage = resultParams(query, modality, libQForResult(collectionId))
 
   if (query) {
     try {
+      // topK 跟着 shown 走，否则翻了页也拿不到更多候选：每条路的截断是写死的，
+      // 不穿透的话第二页和第一页内容完全相同。
       const hits = await search(query, {
         modality,
         collectionId,
+        topK: shown,
       })
       hitCount = hits.length
       items = hits.map((h): ResultItem => {
@@ -227,18 +256,44 @@ export default async function HomePage({
 
   // --- 落地态：检索栏居中 + 最近入库 ---
   if (!query) {
-    const counts = getLibraryList(collectionId).counts
+    const counts = getLibraryCounts(collectionId)
     const empty = counts.video + counts.image + counts.text === 0
-    // 类型传给 SQL，不取回来再筛。取回再筛会让「按文本看最近」变成
-    // 「最近的 24 条里挑文本」，而那 24 条通常全是图片，结果整块空掉。
-    const recent = empty ? [] : getRecentAssets(collectionId, 12, modality === 'all' ? undefined : modality)
+    // **只取最近 5 条，没有分页。** 这一排是引导不是浏览入口，要看全部有左侧
+    // 「素材库」导航。理由与曾经矫枉过正的过程见 lib/recent。
+    // 类型传给 SQL，不取回来再筛：按文本看最近时，若先取 5 条再筛，而那 5 条
+    // 通常全是图片，整块就空掉了。
+    const recent = empty
+      ? []
+      : getRecentAssets(collectionId, RECENT_LIMIT, modality === 'all' ? undefined : modality)
+    // 标题上的总数，按当前类型算，否则「按图片筛」时报的是含视频文本的大数
+    const total = empty
+      ? 0
+      : modality === 'all'
+        ? counts.video + counts.image + counts.text
+        : counts[modality]
 
+    /*
+      **hero 不撑满，上半部分用固定上边距。**
+
+      原来这里是 min-h-[calc(100vh-5rem)]，为的是上下撑开、首屏不显得挤；后来主内容
+      区改成独立滚动（见 AppShell），main 自己就是 h-screen，那层 min-h 会让 hero 比
+      容器高出一点、多出一条滚不动的内部滚动条，于是改成 flex-1 撑开。
+
+      flex-1 也有问题，而且更隐蔽：它把上半部分撑到占满视口，「最近入库」被推到首屏
+      之外。用户看到的是「这个高度是不是太高了」——首屏只有检索栏和一大片空白，而
+      「最近入库」要滚动才看得见。那一排不是装饰，是第一次来的人了解库里有什么的唯一
+      线索，被挤到第二屏等于没有。
+
+      改成 pt-14 固定留白：上面仍有呼吸感，但不吞掉下面的内容。视口 800px 上下时
+      hero 加最近入库的第一行刚好在一屏内。空库时下面是「先去入库」提示，不撑满也
+      说得过去——空库只在新装时出现，为它牺牲常态首屏不值。
+    */
     return (
-      <div className="flex min-h-[calc(100vh-5rem)] flex-col">
-        <div className="flex flex-1 flex-col items-center justify-center px-4">
+      <div className="flex flex-col">
+        <div className="flex flex-col items-center px-4 pt-14">
           <h1 className="text-3xl font-semibold text-neutral-100">找点什么</h1>
           <p className="mt-2 text-sm text-neutral-500">文字、画面、视频里的对白，一个框都能搜</p>
-          <div className="mt-7 flex w-full justify-center">{form(true)}</div>
+          <div className="mt-6 flex w-full justify-center">{form(true)}</div>
           <div className="mt-4">
             <CollectionScope
               collections={collections}
@@ -248,8 +303,6 @@ export default async function HomePage({
               justMadeName={madeName}
             />
           </div>
-          {cerr && <p className="mt-6 text-[11px] text-red-400">新建素材库失败：{cerr}</p>}
-
           {cerr && <p className="mt-6 text-[11px] text-red-400">新建素材库失败：{cerr}</p>}
 
           {empty && (
@@ -263,34 +316,70 @@ export default async function HomePage({
         </div>
 
         {recent.length > 0 && (
-          <section className="mt-10 border-t border-neutral-800 pt-6">
+          <section className="mt-8 border-t border-neutral-800 pt-6">
             <div className="flex items-baseline justify-between gap-3">
-              <h2 className="flex-none text-sm font-medium text-neutral-300">最近入库</h2>
+              <h2 className="flex-none text-sm font-medium text-neutral-300">
+                最近入库
+                {/*
+                  说清库里的总量。**不再显示「看到 N」**：只有 5 条且不分页，
+                  「看到 5」是句废话；要传递的是「库里还有更多，去素材库看」。
+                */}
+                <span className="ml-2 text-[11px] font-normal text-neutral-600">
+                  {total > 0 ? `库里共 ${total} 条` : ''}
+                </span>
+              </h2>
               <div className="flex-none">{filterBar}</div>
               <Link
                 href="/library"
                 className="text-[11px] text-neutral-500 underline hover:text-neutral-300"
               >
-                查看全部
+                去素材库看全部
               </Link>
             </div>
-            <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {/*
+              **两行五列，不是横向滚动一排。**
+
+              这条改过三次，最终回到 grid 5 列 2 行。中间那版是横滚单排，问题两个：
+              一是横滚没有可见滚动条，右边溢出的卡片看起来就是「没有了」，用户不
+              知道还能滚；二是单排 10 张时每张只分到约 130px 宽，图片被压得只剩一条。
+
+              改回 grid 后每张约 260px 宽（落地态全宽下 5 列均分），配 aspect-[16/9]
+              自然高 146px，两行约 400px。页高约 886px，刚过常见视口一点，能滚但不
+              空。窄屏退回 2 列与 3 列，那时折成五行或四行，靠页面滚动看全。
+
+              **栏数必须与 RECENT_LIMIT 除得尽**：5 列放 10 张正好两行。留余数会让
+              最后一行空几格，看着像少加载了几张、像列表坏了。
+            */}
+            <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {recent.map((r) => (
                 <li key={`${r.kind}-${r.id}`}>
                   <Link
                     href={r.detailHref}
                     className="block rounded-md border border-neutral-800 bg-neutral-900/60 p-2 transition hover:border-neutral-600"
                   >
+                    {/*
+                      缩略图两条。
+
+                      **一，不用 loading="lazy"。** 实测它在横滚容器里会失效（右侧
+                      溢出的卡片一张都不加载，首屏出现五个空方框，用户以为图坏了）。
+                      改回 grid 后那个坑不在了，但这一排总共十张 320px 缩略图，总量
+                      很小，省这一次请求换不来什么，却要承担「某个断点下正好卡在加载
+                      边界、看到空框」的风险。不值得。
+
+                      **二，aspect-[16/9] 配 object-contain。** 5 列均分后每张约
+                      260px 宽，配 146px 高正好是横图的自然比例，几乎铺满不留边。
+                      竖图也不裁，在 16:9 的框里左右留白，内容是完整的。原来的
+                      h-20 配 object-cover 把 16:9 横图上下切掉近一半。
+                    */}
                     {r.thumbUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={toThumbUrl(r.thumbUrl, 320) ?? r.thumbUrl}
                         alt=""
-                        loading="lazy"
-                        className="h-20 w-full rounded border border-neutral-800 object-cover"
+                        className="aspect-[16/9] w-full rounded border border-neutral-800 bg-neutral-900 object-contain"
                       />
                     ) : (
-                      <div className="flex h-20 items-center justify-center rounded border border-neutral-800 bg-neutral-900 text-[11px] text-neutral-700">
+                      <div className="flex aspect-[16/9] items-center justify-center rounded border border-neutral-800 bg-neutral-900 text-[11px] text-neutral-700">
                         {KIND_LABEL[r.kind]}
                       </div>
                     )}
@@ -341,6 +430,15 @@ export default async function HomePage({
       )}
 
       {!error && hitCount > 0 && <ResultList items={items} />}
+
+      {!error && hitCount > shown && (
+        <Link
+          href={`/?${resultParamsForPage.toString()}&s=${shown + RESULT_PAGE}`}
+          className="mt-4 block w-full rounded-md border border-neutral-800 px-3 py-2 text-center text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200"
+        >
+          显示更多结果（还有 {hitCount - shown} 条）
+        </Link>
+      )}
     </div>
   )
 }

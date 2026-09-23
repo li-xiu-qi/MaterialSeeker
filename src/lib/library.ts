@@ -1,6 +1,26 @@
 import { getDb } from './db'
 import { toMediaUrl } from './media'
 import { scopeClause, scopeArgs, ALL_COLLECTIONS } from './collections'
+import {
+  libraryWhere,
+  MAX_PAGE,
+  type LibraryList,
+  type LibraryQuery,
+  type LibraryCounts,
+} from './libraryFilter'
+
+/**
+ * 列表类型与筛选条件住在 libraryFilter.ts。**不要在这里再抄一份。**
+ *
+ * 那边的顶层 import 只有类型与纯函数，不碰 better-sqlite3；这个文件的 db 依赖
+ * 进不了测试环境，所以纯逻辑必须留在那边才能被断言。这里 re-export 是为了让
+ * 页面与接口的 import 路径不变，不是为了再用一处。
+ *
+ * 上面那句 `import ... type` 与下面的 `export type` 不重复：前者供本文件内的
+ * 函数签名用，后者供外部按老路径 import。只写后者的话，本文件自己用不到这些名字。
+ */
+export type { LibraryCounts, LibraryList, LibraryFilter, LibraryQuery } from './libraryFilter'
+export { libraryWhere, MAX_PAGE } from './libraryFilter'
 
 /**
  * 素材详情取数。详情页（服务端组件）与详情接口（API）共用这一份实现，
@@ -75,79 +95,140 @@ export interface VideoDetail {
   }>
 }
 
-export interface LibraryCounts {
-  video: number
-  image: number
-  text: number
-}
-
-export interface LibraryList {
-  counts: LibraryCounts
-  /** true 表示这次没按库过滤，此时各行必须显示 collectionName */
-  allCollections: boolean
-  video: Array<{
-    id: number
-    title: string
-    sourcePath: string | null
-    createdAt: string
-    cover: string | null
-    frames: number
-    chunks: number
-    sentences: number
-    collectionId: number
-    collectionName: string
-  }>
-  image: Array<{
-    id: number
-    title: string
-    sourcePath: string | null
-    mediaPath: string | null
-    createdAt: string
-    caption: string | null
-    hasVector: boolean
-    hasCaptionVector: boolean
-    collectionId: number
-    collectionName: string
-  }>
-  text: Array<{
-    id: number
-    title: string
-    createdAt: string
-    chars: number
-    /** 正文全文。列表里的内联编辑要拿它预填，见 getLibraryList 里同款注释 */
-    content: string
-    hasVector: boolean
-    collectionId: number
-    collectionName: string
-  }>
-}
-
-export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryList {
+/**
+ * 库内存量三个数。**只跑 COUNT，一行都不取。**
+ *
+ * 落地页与 counts 接口只要这三个数。走 getLibraryList 等于把全库素材读出来再数
+ * 自己读了多少条；几百条素材时那是一次白取的往返，而调用方要的只是三个整数。
+ */
+export function getLibraryCounts(collectionId: number = ALL_COLLECTIONS): LibraryCounts {
   const db = getDb()
-  // 不给 collectionId 就是全库（管理面用）；给了就只读那一个库，这是检索
-  // 作用域的同一条规则，素材库页面与检索共用。
-  // 三条 SQL 本身都已有 WHERE a.kind = ...，所以只能是 AND，再拼一个 WHERE
-  // 会直接语法错误（实测报 near "WHERE": syntax error）。全部库时片段为空串。
   const scope = scopeClause(collectionId)
   const scopeArg = scopeArgs(collectionId)
+  return {
+    video: countKind(db, 'video', scope, scopeArg),
+    image: countKind(db, 'image', scope, scopeArg),
+    text: countKind(db, 'text', scope, scopeArg),
+  }
+}
 
-  // 计数由取回的列表长度算出（见函数尾部的 return），不单独跑 GROUP BY：
-  // 单独跑会用全库统计，按库过滤时列表是空的而计数还显示 140，两边对不上。
+function countKind(
+  db: ReturnType<typeof getDb>,
+  kind: 'video' | 'image' | 'text',
+  scope: string,
+  scopeArg: unknown[],
+): number {
+  const row = db
+    .prepare(`SELECT count(*) AS n FROM assets a WHERE a.kind = ? ${scope}`)
+    .get(kind, ...scopeArg) as { n: number }
+  return row.n
+}
 
-  const video = db
-    .prepare(
-      `SELECT a.id, a.title, a.source_path, a.created_at,
-              (SELECT count(*) FROM frames f WHERE f.asset_id = a.id) AS frames,
-              (SELECT count(*) FROM chunks c JOIN transcripts t ON t.id = c.transcript_id
-                WHERE t.asset_id = a.id) AS chunks,
-              (SELECT count(*) FROM transcript_sentences s JOIN transcripts t ON t.id = s.transcript_id
-                WHERE t.asset_id = a.id) AS sentences,
-              (SELECT f2.thumb_path FROM frames f2 WHERE f2.asset_id = a.id
-                ORDER BY f2.timestamp_ms LIMIT 1) AS cover
-       FROM assets a JOIN collections c ON c.id = a.collection_id
-       WHERE a.kind = 'video' ${scope} ORDER BY a.id DESC`,
-    )
-    .all(...scopeArg) as Array<{
+/** 一类的取数结果。total 是筛选后的命中总数，与 limit 无关 */
+interface Page<T> {
+  rows: T[]
+  total: number
+}
+
+/**
+ * 跑「计数 + 一页」两条同 WHERE 的查询。**两条查询共用同一个筛选片段。**
+ *
+ * 分成两条而不是用窗口函数一次拿到，是因为三条查询都要它，而窗口函数的写法在
+ * better-sqlite3 里要把 count 包在子查询外层才不破坏 LIMIT 语义，比两条简单查询
+ * 更难读。两次扫描的代价与原来一次全量取回加全量 JS filter 相比小一个数量级。
+ *
+ * **countSql 必须由调用方给，不从 selectSql 截。** 截取这个念头本身是错的：三条
+ * select 的开头都是 SELECT ...（视频那条的子查询里还有三个 FROM），正则找「第一个
+ * FROM」会在子查询上截断，拼出的 SQL 是 `SELECT count(*) FROM frames f WHERE ...`
+ * 再接后半截，直接语法错。显式给一条同 FROM 同 WHERE 的 count，改一处 select
+ * 就改一处 count，看得见对得上。
+ */
+function page<T>(
+  db: ReturnType<typeof getDb>,
+  scope: string,
+  scopeArg: unknown[],
+  whereSql: string,
+  whereArgs: unknown[],
+  limit: number | null,
+  selectSql: string,
+  /** 与 selectSql 同 FROM 同 WHERE、只查 count(*) 的那一条 */
+  countSql: string,
+): Page<T> {
+  const total = (
+    db.prepare(countSql).get(...scopeArg, ...whereArgs) as { n: number }
+  ).n
+
+  // limit 为 null 时不拼 LIMIT 而不是绑 null：绑 null 在 better-sqlite3 里会按
+  // 类型错报，而语义本该是「不限」，拼两套 SQL 更直白。
+  const sql = limit === null ? selectSql : `${selectSql} LIMIT ${limit}`
+  const rows = db.prepare(sql).all(...scopeArg, ...whereArgs) as T[]
+  return { rows, total }
+}
+
+/**
+ * 素材库一页。**筛选与分页都压在 SQL 里，不取回来再筛。**
+ *
+ * 这一条是这次优化的全部要点，按代价从大到小：
+ *
+ * 1. 原来三个查询一条 LIMIT 都没有，`slice(0, shown)` 切的是已经取完的结果集。
+ *    取 145 条与取 24 条的差别不只是 SQL 时间，还有每行三四个子查询（帧数、块数、
+ *    句数、封面）和一次全量 JS map。「大规模内容时有点卡」卡的是这里，不是渲染。
+ *    现在 LIMIT 直接把每类条数钉在 SQL 上。
+ *
+ * 2. 原来 kind 与关键词都在 JS 里 filter，而 limit 只作用于图片一类，于是视频与
+ *    文本实际是全量渲染的：一个库有 300 个视频就渲染 300 张卡片。现在三个数都
+ *    来自 SQL，页面不再自己切。
+ *
+ * 3. 空态文案需要准确的 total。counts 是库内存量，total 是筛选后的命中数，页面
+ *    靠后者区分「被类型筛掉了」与「没有匹配」。这要求筛选用 SQL：在内存里筛的话
+ *    total 只能数自己取回的那几条，永远 ≤ limit。
+ *
+ * **不给 collectionId 就是全库**（管理面用）；给了就只读那一个库，这是检索作用域
+ * 的同一条规则，素材库页面与检索共用。三条 SQL 本身都已有 WHERE a.kind = ...，
+ * 所以只能是 AND，再拼一个 WHERE 会直接语法错误。全部库时作用域片段为空串。
+ */
+export function getLibraryList(
+  collectionId: number = ALL_COLLECTIONS,
+  query: LibraryQuery = {},
+): LibraryList {
+  const db = getDb()
+  const scope = scopeClause(collectionId)
+  const scopeArg = scopeArgs(collectionId)
+  const counts = getLibraryCounts(collectionId)
+
+  // 筛选片段由纯函数产出，三条查询共用一份规则。**不在这里各拼一次**：拼漏一处
+  // 的后果是那一类不按关键词筛，而页面上三类并排显示，错得显眼但很难定位。
+  const where = libraryWhere(query)
+  // limit 不给就是全量（接口与 counts 都要）。0 与不给等价，不是「取 0 条」。
+  const limit =
+    query.limit && query.limit > 0 ? Math.min(Math.trunc(query.limit), MAX_PAGE) : null
+
+  /**
+   * 类型筛选。**没被选中的那一类整条查询都不跑，返回空结果。**
+
+   *
+   * 这个字段曾在整个文件里一次都没被读到，后果是选了「文本」视频与图片照样显示
+   * （用户报过）。原因是把筛选从内存搬到 SQL 那次：旧实现在 JS 里 filter，类型
+   * 被筛掉的两组返回空数组；新实现的注释写了「类型不进 WHERE 片段，由各查询自己
+   * 写 a.kind = ?」，而三条 SQL 里的 a.kind 全是写死的字面量，没有任何一层读
+   * query.kind。类型筛选就此凭空消失，且不报错——只是三类全出来。
+
+   *
+
+   * 不跑查询而不是 `AND 1=0`：后者仍要付一次全表扫描加 count，而这一组注定是空的。
+
+   * 直接给空结果，顺带让 total 为 0，页面的「已被类型筛选排除」空态文案才对得上。
+
+   *
+
+   * counts 不受影响：那是库内存量，始终全量算，页面顶部那行说的是库里有什么。
+
+   */
+  const wanted = (k: 'video' | 'image' | 'text') => !query.kind || query.kind === k
+  const EMPTY_PAGE = { rows: [], total: 0 }
+
+  const video = wanted('video')
+    ? page<{
     id: number
     title: string
     source_path: string | null
@@ -158,20 +239,32 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
     cover: string | null
     collection_id: number
     collection_name: string
-  }>
-
-  const image = db
-    .prepare(
-      `SELECT a.id, a.title, a.source_path, a.created_at, a.collection_id,
-              c.name AS collection_name, im.caption,
-              COALESCE(im.file_path, a.source_path) AS media_path,
-              (im.embedding IS NOT NULL) AS has_vec,
-              (im.caption_embedding IS NOT NULL) AS has_caption_vec
-       FROM assets a JOIN images im ON im.asset_id = a.id
-       JOIN collections c ON c.id = a.collection_id
-       WHERE a.kind = 'image' ${scope} ORDER BY a.id DESC`,
+  }>(
+    db,
+    scope,
+    scopeArg,
+    where.sql,
+    where.args,
+    limit,
+    `SELECT a.id, a.title, a.source_path, a.created_at,
+            (SELECT count(*) FROM frames f WHERE f.asset_id = a.id) AS frames,
+            (SELECT count(*) FROM chunks c JOIN transcripts t ON t.id = c.transcript_id
+              WHERE t.asset_id = a.id) AS chunks,
+            (SELECT count(*) FROM transcript_sentences s JOIN transcripts t ON t.id = s.transcript_id
+              WHERE t.asset_id = a.id) AS sentences,
+            (SELECT f2.thumb_path FROM frames f2 WHERE f2.asset_id = a.id
+              ORDER BY f2.timestamp_ms LIMIT 1) AS cover,
+            a.collection_id, c.name AS collection_name
+     FROM assets a JOIN collections c ON c.id = a.collection_id
+     WHERE a.kind = 'video' ${scope} ${where.sql} ORDER BY a.id DESC`,
+      `SELECT count(*) AS n
+       FROM assets a JOIN collections c ON c.id = a.collection_id
+       WHERE a.kind = 'video' ${scope} ${where.sql}`,
     )
-    .all(...scopeArg) as Array<{
+    : EMPTY_PAGE
+
+  const image = wanted('image')
+    ? page<{
     id: number
     title: string
     source_path: string | null
@@ -182,36 +275,69 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
     has_caption_vec: number
     collection_id: number
     collection_name: string
-  }>
-
-  const text = db
-    .prepare(
-      `SELECT a.id, a.title, a.created_at, a.collection_id,
-              c.name AS collection_name, n.content, length(n.content) AS chars,
-              (n.embedding IS NOT NULL) AS has_vec
-       FROM assets a JOIN text_notes n ON n.asset_id = a.id
+  }>(
+    db,
+    scope,
+    scopeArg,
+    where.sql,
+    where.args,
+    limit,
+    `SELECT a.id, a.title, a.source_path, a.created_at, a.collection_id,
+            c.name AS collection_name, im.caption,
+            COALESCE(im.file_path, a.source_path) AS media_path,
+            (im.embedding IS NOT NULL) AS has_vec,
+            (im.caption_embedding IS NOT NULL) AS has_caption_vec
+     FROM assets a JOIN images im ON im.asset_id = a.id
+     JOIN collections c ON c.id = a.collection_id
+     WHERE a.kind = 'image' ${scope} ${where.sql} ORDER BY a.id DESC`,
+      `SELECT count(*) AS n
+       FROM assets a JOIN images im ON im.asset_id = a.id
        JOIN collections c ON c.id = a.collection_id
-       WHERE a.kind = 'text' ${scope} ORDER BY a.id DESC`,
+       WHERE a.kind = 'image' ${scope} ${where.sql}`,
     )
-    .all(...scopeArg) as Array<{
+    : EMPTY_PAGE
+
+  const text = wanted('text')
+    ? page<{
     id: number
     title: string
+    source_path: string | null
     created_at: string
     content: string
     chars: number
     has_vec: number
     collection_id: number
     collection_name: string
-  }>
+  }>(
+    db,
+    scope,
+    scopeArg,
+    where.sql,
+    where.args,
+    limit,
+    `SELECT a.id, a.title, a.source_path, a.created_at, a.collection_id,
+            c.name AS collection_name, n.content, length(n.content) AS chars,
+            (n.embedding IS NOT NULL) AS has_vec
+     FROM assets a JOIN text_notes n ON n.asset_id = a.id
+     JOIN collections c ON c.id = a.collection_id
+     WHERE a.kind = 'text' ${scope} ${where.sql} ORDER BY a.id DESC`,
+      `SELECT count(*) AS n
+       FROM assets a JOIN text_notes n ON n.asset_id = a.id
+       JOIN collections c ON c.id = a.collection_id
+       WHERE a.kind = 'text' ${scope} ${where.sql}`,
+    )
+    : EMPTY_PAGE
 
   return {
     allCollections: collectionId === ALL_COLLECTIONS,
-    counts: {
-      video: video.length,
-      image: image.length,
-      text: text.length,
+    counts,
+    total: { video: video.total, image: image.total, text: text.total },
+    hasMore: {
+      video: video.rows.length < video.total,
+      image: image.rows.length < image.total,
+      text: text.rows.length < text.total,
     },
-    video: video.map((v) => ({
+    video: video.rows.map((v) => ({
       id: v.id,
       collectionId: v.collection_id,
       collectionName: v.collection_name,
@@ -223,7 +349,7 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
       chunks: v.chunks,
       sentences: v.sentences,
     })),
-    image: image.map((im) => ({
+    image: image.rows.map((im) => ({
       id: im.id,
       collectionId: im.collection_id,
       collectionName: im.collection_name,
@@ -235,11 +361,12 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
       hasVector: Boolean(im.has_vec),
       hasCaptionVector: Boolean(im.has_caption_vec),
     })),
-    text: text.map((t) => ({
+    text: text.rows.map((t) => ({
       id: t.id,
       collectionId: t.collection_id,
       collectionName: t.collection_name,
       title: t.title,
+      sourcePath: t.source_path,
       createdAt: t.created_at,
       chars: t.chars,
       // 列表里的内联编辑要拿现有正文预填。**不传的代价是用户一保存就把正文
@@ -249,6 +376,7 @@ export function getLibraryList(collectionId: number = ALL_COLLECTIONS): LibraryL
     })),
   }
 }
+
 
 export function getImageDetail(id: number): ImageDetail | null {
   const db = getDb()
@@ -509,40 +637,6 @@ export function getRecentAssets(
             : `/library?lib=${collectionId === ALL_COLLECTIONS ? 'all' : collectionId}`,
     }
   })
-}
-
-export interface LibraryFilter {
-  kind?: 'video' | 'image' | 'text'
-  /** 标题与说明的子串匹配，中文按子串走 LIKE，不依赖分词 */
-  q?: string
-}
-
-/**
- * 带筛选的素材列表。给素材库页与检索页的筛选用。
- *
- * 关键词用 LIKE 子串而不是 FTS：FTS 默认 tokenizer 不分词中文，中文查询恒零命中
- * （这个坑记在 search.ts 与 PRD 开放问题 6）。素材库这边只是按标题和说明过一遍
- * 已经取回来的几百条，LIKE 足够，也不值得为它引入分词。
- */
-export function filterLibraryList(list: LibraryList, filter: LibraryFilter): LibraryList {
-  const kw = filter.q?.trim().toLowerCase() ?? ''
-  const keep = (title: string, caption: string | null) => {
-    if (!kw) return true
-    return (
-      title.toLowerCase().includes(kw) || (caption ?? '').toLowerCase().includes(kw)
-    )
-  }
-  return {
-    counts: list.counts,
-    // 必须透传：丢了它，素材库页就不知道该给每行标注所属库
-    allCollections: list.allCollections,
-    video: filter.kind && filter.kind !== 'video' ? [] : list.video.filter((v) => keep(v.title, null)),
-    image:
-      filter.kind && filter.kind !== 'image'
-        ? []
-        : list.image.filter((im) => keep(im.title, im.caption)),
-    text: filter.kind && filter.kind !== 'text' ? [] : list.text.filter((t) => keep(t.title, null)),
-  }
 }
 
 /**

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { TextIngestForm } from '@/components/TextIngestForm'
 import { UploadPanel } from '@/components/UploadPanel'
+import { QueuePanel } from '@/components/QueuePanel'
 import { listCollections, normalizeCollectionId, getCollection } from '@/lib/collections'
 
 export const dynamic = 'force-dynamic'
@@ -60,7 +61,7 @@ export default async function IngestPage({
   const total = Number(count) || imgN + vidN
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-5xl">
       <h1 className="text-2xl font-semibold">入库</h1>
       <p className="mt-1 text-sm text-neutral-400">
         当前入库到「{current ? current.name : '默认库'}」，切换库请在上方选择
@@ -110,10 +111,25 @@ export default async function IngestPage({
         </div>
       )}
 
-      <UploadPanel
-        collections={collections.map((c) => ({ id: c.id, name: c.name }))}
-        currentCollectionId={currentId}
-      />
+      {/*
+        **两栏，任务队列在右而不是全局导航。** 它属于入库页的上下文：真正的等待
+        发生在这一页，左边上传面板就是实时进度；右栏补的是左栏给不了的，即刷新后
+        仍在、其他标签页发起的任务。它曾挂在全局导航侧边栏，被指出层级错了——
+        一块与导航无关的内容常驻在那里，每次打开应用都看得见，而它对检索页与素材库
+        页毫无意义。
+
+        窄屏（<lg）右侧栏整体隐藏，不堆到上传面板下面：等待期间人看的是左栏那一批，
+        右栏在这时只是补充，真需要时把窗口拉宽即可，它不是主路径。
+
+        错误提示与入库汇总刻意留在这两栏之外：它们是这一批操作的结论，与「哪些任务
+        还在跑」不是一回事，塞进左栏会让人以为它属于上传面板。
+      */}
+      <div className="mt-6 flex items-start gap-8">
+        <div className="min-w-0 flex-1">
+          <UploadPanel
+          collections={collections.map((c) => ({ id: c.id, name: c.name }))}
+          currentCollectionId={currentId}
+        />
 
       {/*
         文本入库单独一张卡。**不是塞进上面那个上传面板里**：那边是「选文件」
@@ -121,10 +137,22 @@ export default async function IngestPage({
         挤在同一块区域。分成两张卡，各管一种输入形态。
         原生表单提交，跟图片视频一样不依赖 JS。
       */}
-      <TextIngestForm
-        collections={collections.map((c) => ({ id: c.id, name: c.name }))}
-        currentCollectionId={currentId}
-      />
+          <TextIngestForm
+            collections={collections.map((c) => ({ id: c.id, name: c.name }))}
+            currentCollectionId={currentId}
+          />
+        </div>
+
+        <aside className="hidden w-64 flex-none lg:block">
+          {/*
+            sticky 跟着滚：任务要跑几分钟，这一页会长，队列停在视野里才对。
+            top-10 对齐主区的 py-10，不贴顶。
+          */}
+          <div className="sticky top-10">
+            <QueuePanel />
+          </div>
+        </aside>
+      </div>
     </div>
   )
 }

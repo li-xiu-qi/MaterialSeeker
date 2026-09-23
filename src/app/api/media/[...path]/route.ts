@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import { createReadStream, statSync, renameSync, existsSync } from 'node:fs'
+import { createReadStream, statSync, existsSync } from 'node:fs'
 import { Readable } from 'node:stream'
-import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { PATHS } from '@/lib/paths'
+import { THUMB_WIDTHS, thumbKey, generateThumbs } from '@/lib/thumbs'
 
 export const runtime = 'nodejs'
 
@@ -133,20 +133,16 @@ function requestedWidth(req: Request): number {
 async function serveThumb(abs: string, width: number): Promise<NextResponse | null> {
   try {
     const st = statSync(abs)
-    const key = createHash('sha1')
-      .update(`${width}:${abs}:${st.mtimeMs}:${st.size}`)
-      .digest('hex')
-    const file = path.join(PATHS.thumbsDir, `${key}.jpg`)
+    // 键算法住在 lib/thumbs。**不要在这里重算一份**：入库时预生成用的同一个键，
+    // 两侧各写一遍必然漂移，漂移的后果是预生成的文件路由认不出，照旧走 resize。
+    const file = path.join(PATHS.thumbsDir, `${thumbKey(abs, width, st.mtimeMs, st.size)}.jpg`)
 
-    if (!existsSync(file)) {
-      const sharp = (await import('sharp')).default
-      const tmp = `${file}.${process.pid}.tmp`
-      await sharp(abs)
-        .resize({ width, withoutEnlargement: true, fit: 'inside' })
-        .jpeg({ quality: 78, mozjpeg: true })
-        .toFile(tmp)
-      renameSync(tmp, file)
-    }
+    // 没预生成过（旧素材、或入库时那几档恰好失败）就地生成全部档位，而不是只返回原图：
+    // 旧素材同样该享受预生成的好处，而它们不会再有入库时机。代价是这一次请求变慢——
+    // 三档一起付，比之后每次访问各付一次划算。
+    if (!existsSync(file)) await generateThumbs(abs)
+
+    if (!existsSync(file)) return null
 
     const headers = new Headers({
       'Content-Type': 'image/jpeg',

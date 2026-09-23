@@ -1,6 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
+import { ScrollSafeSelect } from './ScrollSafeSelect'
 
 /**
  * 检索范围选择器。**放在具体页面里，不放侧边栏。**
@@ -74,7 +75,12 @@ export function CollectionScope({
         {hidden.map(([k, v]) => (
           <input key={k} type="hidden" name={k} value={v} />
         ))}
-        <select
+        {/*
+          滚轮友好版下拉框。原生 select 会吞滚轮：鼠标停在它上面往下拨，选中的是
+          另一个库、页面一步不动，看着就像滚轮坏了。而这个框就在页面顶部，用户
+          从侧边栏点进来时鼠标往往正停在附近。理由与取舍见 ScrollSafeSelect。
+        */}
+        <ScrollSafeSelect
           name="lib"
           defaultValue={currentId === ALL ? 'all' : String(currentId)}
           aria-label={label}
@@ -86,7 +92,7 @@ export function CollectionScope({
               {c.name}
             </option>
           ))}
-        </select>
+        </ScrollSafeSelect>
         <button
           type="submit"
           className="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"

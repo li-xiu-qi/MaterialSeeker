@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { QueuePanel } from '@/components/QueuePanel'
 
 /**
  * 应用外壳：左侧常驻导航 + 右侧主区。
@@ -18,10 +17,12 @@ import { QueuePanel } from '@/components/QueuePanel'
  * 入库页完全没用。放在边栏里它就和三个导航项抢注意力，用户还得先理解「这跟
  * 上面那三个不是一回事」。它现在由各页面自己的 CollectionScope 呈现。
  *
- * **例外是 QueuePanel（后台任务）。** 它不是入口，是「现在有事情在后台跑」的
- * 常驻状态，和上面的规则不同级。放这里的理由恰恰相反：任务进度只存在于发起
- * 它的那个页面，用户切走就看不见；而长任务等待期间去干点别的是正当需求，
- * 不是异常路径。任务数不为零时它才出现，空闲不占侧边栏空间。
+ * **后台任务队列也不放这里。** 它在导航侧边栏挂过一段时间，理由是「任务进度只
+ * 存在在发起它的那个页面，用户切走就看不见」。这个理由不成立：真实的等待发生
+ * 在入库页，人在那里等，进度左栏就有；切走页面是少数情况，为少数情况把一块
+ * 与导航无关的内容常驻在全局导航里，代价是每一次打开这个应用都要看见它，而它
+ * 对检索页与素材库页毫无意义。层级上任务进度属于入库页的上下文，不属于导航。
+ * 现已移进入库页自己的右侧栏。
  *
  * 本文件是客户端组件，唯一的原因是要用 usePathname 高亮当前项。
  */
@@ -37,6 +38,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen">
+      {/*
+        **刻意不加 overflow-y-auto。**
+
+        曾经加过，理由是「fixed inset-y-0 的高度被钉在视口上，队列条目多起来会
+        被裁死且自身滚不动」。实测发现这一下有反效果，而且是更糟的那一种：
+        `overflow: auto` 会让这个容器成为 scroll chain 的边界。内容不超高时它
+        自己滚不了，于是鼠标停在它上面拨滚轮时，滚轮被消费在这里——页面也不滚，
+        表现就是「拨滚轮完全不动」。而用户刚刚点过侧边栏导航，鼠标往往还停在
+        这个区域，命中率很高。用户报过这个现象。
+
+        两害相权取其轻：保持 overflow 默认值，让它不是滚动目标，滚轮正常冒泡到
+        document；代价是队列条目极端多时靠下的部分看不到。那个代价有兜底——
+        队列面板底部有「去入库页看详情」链接，入库页能看全部任务。
+      */}
       <aside className="fixed inset-y-0 left-0 flex w-60 flex-none flex-col border-r border-neutral-800 bg-neutral-950 px-4 py-6">
         <div className="px-2">
           <p className="text-base font-semibold text-neutral-100">VideoSeeker</p>
@@ -73,10 +88,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <QueuePanel />
       </aside>
 
-      <main className="ml-60 min-w-0 flex-1 px-8 py-10">{children}</main>
+      {/*
+        **主内容区自己滚，侧边栏钉死不动。**
+
+        原来是整页（document）滚、侧边栏靠 fixed 留在原处。那样在素材库这种长页面
+        上出过反复修不好的问题：用户报「拨滚轮页面完全不动」，而自动化环境测同一条
+        URL 文档高 5083px、可滚 4.8 屏——滚得到与滚不到取决于环境里说不清的若干
+        因素（原生 select 吞滚轮、overflow 容器成为 scroll chain 边界等），逐个堵
+        漏堵不干净。
+
+        改成主区独立滚动后，能否滚只取决于这一层容器自己，不再依赖整页滚动是否
+        通：h-screen 把高度钉在视口上，overflow-y-auto 由它承担滚动。侧边栏本来
+        就是 fixed，两者的职责从此不重叠。工作台类应用（侧边栏常驻、内容区独立滚）
+        也是更常见的形态。
+
+        滚动条样式见 globals.css：暗色页面上 Chrome 默认的 overlay 滚动条很淡，
+        几乎看不见，而它是「这里还有内容」的唯一提示。
+      */}
+      <main className="ml-60 h-screen min-w-0 flex-1 overflow-y-auto overscroll-contain px-8 py-10">
+        {children}
+      </main>
     </div>
   )
 }

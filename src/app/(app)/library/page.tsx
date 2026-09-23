@@ -1,3 +1,12 @@
+import {
+  COL_OPTIONS,
+  parseCols,
+  LIST_CLS,
+  THUMB_W,
+  COVER_W,
+} from '@/lib/layout'
+import { MAX_PAGE } from '@/lib/libraryFilter'
+import { ScrollSafeSelect } from '@/components/ScrollSafeSelect'
 import Link from 'next/link'
 
 const FILTERS = [
@@ -7,60 +16,8 @@ const FILTERS = [
   { value: 'text', label: '文本' },
 ] as const
 
-/**
- * 列表栏数。**走 URL 参数，不用客户端 state。**
- *
- * 这个页面所有控件都不依赖 JS，栏数切换也没理由依赖：换栏就是一个链接，点完
- * 整页重出。用 state 的话，hydration 不生效时按钮还在但点了没反应，而列表本身
- * 是只读的。
- *
- * `img` 分页参数要跟着一起带：栏数变了单屏能放的条数就变了，但已加载的条数
- * 不该因此丢，否则从四栏切回单栏时刚显示的图又缩回 24 张。
- */
-const COL_OPTIONS = [
-  { value: '1', label: '单栏' },
-  { value: '2', label: '双栏' },
-  { value: '4', label: '四栏' },
-] as const
 
-const parseCols = (c: string | undefined): 1 | 2 | 4 =>
-  c === '2' ? 2 : c === '4' ? 4 : 1
-
-/**
- * 栏数对应的列表容器类。**必须是字面量，不能用 `grid-cols-${cols}` 拼。**
- *
- * Tailwind 按源码里出现过的字面类名生成 CSS，模板字符串拼出来的类名在构建时
- * 不存在，扫不到就不会生成，结果是双栏四栏看着没生效、控制台也不报错。这类坑
- * 靠「改完看一眼」发现不了，因为单栏本来就没用到这几个类。
- *
- * 单栏保持 space-y-3 的竖排间距；多栏用 grid，卡片高度不一时由 grid 自动对齐。
- */
-const LIST_CLS: Record<1 | 2 | 4, string> = {
-  1: 'mt-3 space-y-3',
-  2: 'mt-3 grid grid-cols-2 gap-3',
-  4: 'mt-3 grid grid-cols-4 gap-3',
-}
-
-/**
- * 缩略图按栏数分级请求尺寸。缩略图不是请求越大越清晰，是「源图够铺满显示区域
- * 就行」：二栏卡片内容宽约 409px，仍按单栏的 192px 请求会被拉成 2.2 倍放大，
- * 肉眼可见地糊；四栏约 199px，192px 刚好不放大。所以一栏给 192（显示只有 128px），
- * 二栏给 640，四栏给 384。
- *
- * 同样是字面量常量，理由同 LIST_CLS：构建时要能扫到具体值。
- */
-const THUMB_W: Record<1 | 2 | 4, number> = {
-  1: 192,
-  2: 640,
-  4: 384,
-}
-const COVER_W: Record<1 | 2 | 4, number> = {
-  1: 256,
-  2: 640,
-  4: 384,
-}
-
-import { getLibraryList, filterLibraryList } from '@/lib/library'
+import { getLibraryList } from '@/lib/library'
 import { toMediaUrl, toThumbUrl } from '@/lib/media'
 import { LibraryDeleteButton } from '@/components/LibraryDeleteButton'
 import { LibraryEditButton } from '@/components/LibraryEditButton'
@@ -83,7 +40,9 @@ export const dynamic = 'force-dynamic'
  * 页面就永久停在「加载中…」，而列表本身是只读的，没有任何理由要等 JS。
  * 现在这个页面的内容在 HTML 里就是全的，JS 挂不挂都能看。
  *
- * 分页走 URL 参数 ?img=<已显示条数>，不用客户端 state，同样是为了不依赖 JS。
+ * 分页走 URL 参数 ?n=<每一类显示多少条>，不用客户端 state，同样是为了不依赖 JS。
+ * **三类共用一个 n，不再只有图片能翻页**：原来 limit 只作用于图片，视频与文本
+ * 实际是全量渲染的，一个库有几百个视频就渲染几百张卡片。
  * 删除是唯一需要 JS 的动作（要发 DELETE），做成一个小岛，JS 失效时只是删不了，
  * 不影响浏览。
  */
@@ -172,7 +131,8 @@ function BulkBar({
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select
+      {/* 目标库下拉同样会吞滚轮，理由与取舍见 ScrollSafeSelect */}
+      <ScrollSafeSelect
         name="to"
         form={formId}
         defaultValue=""
@@ -186,7 +146,7 @@ function BulkBar({
             {t.id === currentId ? '（当前）' : ''}
           </option>
         ))}
-      </select>
+      </ScrollSafeSelect>
       <button type="submit" form={formId} formAction="/api/library/move" formMethod="post" className={btn}>
         移动到库
       </button>
@@ -227,11 +187,47 @@ function BulkBar({
   )
 }
 
+/**
+ * 一组的「显示更多」。**没有更多时返回 null，连 DOM 里都不进。**
+ *
+ * remaining 由调用方用服务端给的 total 减已显示条数算出。**页面不自己有没有更多**：
+ * 自己数只能数自己取回来的那几条，永远看不到「还有更多」这一态。
+ *
+ * 链接带 keep（作用域、类型、关键词、栏数的当前态），再叠 n=已显示条数 + 一页。
+ * 走 URLSearchParams 而不是手写模板串，是漏带某个参数时不会静默丢掉当前视图：
+ * 手写串漏一个 kw，翻页后筛选就没了，而用户看不出是翻页弄丢的还是自己弄丢的。
+ *
+ * **keep 与 shown 显式传入，不从页面闭包里取。** 这个组件定义在页面组件之外，
+ * 那时 shown 与 keepForCols 都还不存在；靠闭包捕获只会拿到 undefined，而 undefined
+ * 拼进 URL 变成 n=NaN，不报错，表现为「点了显示更多回到第一页」。
+ */
+function MoreLink({
+  keep,
+  shown,
+  remaining,
+  unit,
+}: {
+  keep: URLSearchParams
+  shown: number
+  remaining: number
+  unit: string
+}) {
+  if (remaining <= 0) return null
+  return (
+    <Link
+      href={`/library?${keep.toString()}&n=${shown + PAGE}`}
+      className="mt-3 block w-full rounded-md border border-neutral-800 px-3 py-2 text-center text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200"
+    >
+      显示更多（还有 {remaining} {unit}）
+    </Link>
+  )
+}
+
 export default async function LibraryPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    img?: string
+    n?: string
     lib?: string
     k?: string
     kw?: string
@@ -247,7 +243,7 @@ export default async function LibraryPage({
   }>
 }) {
   const {
-    img,
+    n,
     lib,
     k,
     kw,
@@ -262,9 +258,11 @@ export default async function LibraryPage({
     select,
   } = await searchParams
   const collectionId = normalizeCollectionId(lib)
-  const shown = Math.max(PAGE, Math.min(Number(img) || PAGE, 400))
-  // 类型与关键词筛选。关键词按标题与画面描述做子串匹配，理由见
-  // filterLibraryList 的注释：中文不走 FTS，那条路默认 tokenizer 不分词。
+  // n 由用户经 URL 给，钳在 [PAGE, MAX_PAGE]：小于一页没有意义（会漏看），
+  // 大于上限是手打参数，服务端还会再钳一次，两边同一个常数。
+  const shown = Math.max(PAGE, Math.min(Number(n) || PAGE, MAX_PAGE))
+  // 类型与关键词筛选。关键词按标题与画面描述做模糊匹配，理由见 libraryWhere：
+  // 中文不走 FTS，那条路默认 tokenizer 不分词，LIKE 对中文够用也不依赖分词。
   const kind = k === 'video' || k === 'image' || k === 'text' ? k : undefined
   const keyword = (kw ?? '').trim()
   const all = listCollections()
@@ -281,9 +279,10 @@ export default async function LibraryPage({
   // 会把 0 当非法值回落成默认库，结果是「选了全部库，一过滤就悄悄回到默认库」
   // 且没有任何提示。
   const libQ = collectionId === ALL_COLLECTIONS ? 'all' : String(collectionId)
-  const data = filterLibraryList(getLibraryList(collectionId), { kind, q: keyword })
-  const images = data.image.slice(0, shown)
-  const rest = data.image.length - images.length
+  // **筛选与 limit 都交给 SQL，页面不自己切。** 原来的写法是全量取回再
+  // JS filter，limit 又只切图片一类，视频与文本照样全量渲染、「大规模内容时有点卡」
+  // 卡的就是取数那一步。现在三个数都来自 SQL，页面只负责把它们摆出来。
+  const data = getLibraryList(collectionId, { kind, q: keyword, limit: shown })
   // 栏数与由它推出的布局。放在这里是因为它依赖 libQ 与 shown，两者在上面才算出来。
   const cols = parseCols(c)
   /** 单栏时卡片是横排（缩略图在左），多栏时改竖排，否则窄栏里图和字挤在一起 */
@@ -302,14 +301,14 @@ export default async function LibraryPage({
   const backHref = withSelect(
     `/library?lib=${libQ}&k=${kind ?? 'all'}&kw=${encodeURIComponent(
       keyword,
-    )}&c=${cols}${shown > PAGE ? `&img=${shown}` : ''}`,
+    )}&c=${cols}${shown > PAGE ? `n=${shown}` : ''}`,
   )
-  /** 栏数切换时要一并带上的参数：丢了 img 会把已加载的图缩回首页 */
+  /** 栏数切换时要一并带上的参数：丢了 n 会把已加载的条目缩回一页 */
   const keepForCols = new URLSearchParams({
     lib: libQ,
     k: kind ?? 'all',
     kw: keyword,
-    ...(shown > PAGE ? { img: String(shown) } : {}),
+    ...(shown > PAGE ? { n: String(shown) } : {}),
   })
   /** 多选入口与退出。exit 刻意不加 select：它要的正是「把参数拿掉」的那个链接 */
   const enterSelectHref = `/library?${keepForCols.toString()}&select=1`
@@ -578,12 +577,18 @@ export default async function LibraryPage({
             </ul>
           </form>
         )}
+        <MoreLink
+          keep={keepForCols}
+          shown={shown}
+          remaining={data.total.video - data.video.length}
+          unit="个"
+        />
       </section>
 
       <section className="mt-10">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">图片</h2>
-          {images.length > 0 && (
+          {data.image.length > 0 && (
             <BulkBar
               formId="bulk-image"
               targets={collections}
@@ -595,7 +600,7 @@ export default async function LibraryPage({
             />
           )}
         </div>
-        {images.length === 0 ? (
+        {data.image.length === 0 ? (
           <p className="mt-3 text-xs text-neutral-700">
             {kind && kind !== 'image'
               ? '已被类型筛选排除'
@@ -607,7 +612,7 @@ export default async function LibraryPage({
           <form id="bulk-image" action="/api/library/bulk/form" method="post">
             <input type="hidden" name="redirect" value={backHref} />
             <ul className={listCls}>
-              {images.map((im) => {
+              {data.image.map((im) => {
                 const thumb = toThumbUrl(im.mediaPath, THUMB_W[cols])
                 const thumbCls = wide
                   ? 'h-24 w-32 flex-none rounded border border-neutral-800 object-cover'
@@ -731,16 +736,12 @@ export default async function LibraryPage({
             </ul>
           </form>
         )}
-        {rest > 0 && (
-          <Link
-            href={`/library?lib=${libQ}&k=${kind ?? 'all'}&kw=${encodeURIComponent(
-              keyword,
-            )}&c=${cols}&img=${shown + PAGE}`}
-            className="mt-3 block w-full rounded-md border border-neutral-800 px-3 py-2 text-center text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200"
-          >
-            显示更多（还有 {rest} 张）
-          </Link>
-        )}
+        <MoreLink
+          keep={keepForCols}
+          shown={shown}
+          remaining={data.total.image - data.image.length}
+          unit="张"
+        />
       </section>
 
       <section className="mt-10">
@@ -810,6 +811,12 @@ export default async function LibraryPage({
             </ul>
           </form>
         )}
+        <MoreLink
+          keep={keepForCols}
+          shown={shown}
+          remaining={data.total.text - data.text.length}
+          unit="条"
+        />
       </section>
 
       {moved !== null && (

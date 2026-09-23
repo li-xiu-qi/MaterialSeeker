@@ -1,22 +1,29 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import Link from 'next/link'
 
 /**
- * 侧边栏常驻的「后台任务」队列。
+ * 入库页右侧栏的「后台任务」队列。
  *
- * **为什么它必须在侧边栏而不在入库页里**：入库面板的进度存在组件 state 里，
- * 用户一旦切去检索页或素材库就什么都看不见。而长任务的等待期间，用户去做点
- * 别的是正当需求（顺手搜一下、看看别的库），不是异常路径。进度只在发起它的
- * 那个页面可见，等于强迫人钉在原地等。
+ * **它属于入库页，不属于导航侧边栏。** 位置改过一次，记下两次的理由与翻车点：
+ *
+ * 第一版挂在全局导航侧边栏，理由是「任务进度只存在在发起它的那个页面，用户切走
+ * 就看不见」。这个理由经不起推敲：真正的等待发生在入库页，人在那里等，左边上传
+ * 面板就有实时进度；切去别的页面是少数情况。为少数情况把一块与导航无关的内容常驻
+ * 在全局导航里，代价是每次打开应用都看见它，而它对检索页与素材库页毫无意义。
+ * 层级上任务进度是入库页的上下文，不是导航项。用户明确指出过这一点。
+ *
+ * 它相对左栏上传面板仍有存在价值，**两者不是重复**：左栏 rows 是「本次会话选中
+ * 的这一批」，带上传字节进度与本地预览，刷新页面即丢；这里是服务端视角的全量队列，
+ * 刷新后还在，别的标签页发起的任务也在这里。所以刷新页面是个真实场景：左栏空了，
+ * 右边还知道刚才那几个任务跑到哪了。
  *
  * **为什么轮询服务端而不是读组件 state**：服务端的 ingest_jobs 表是唯一真相。
- * 上传阶段也为每个文件先建了行（status=uploading），所以连最长的那段（上传
- * 本身）都看得见，不会出现「队列空着但文件还在传」的空窗。
+ * 上传阶段也为每个文件先建了行（status=uploading），所以连最长的那段（上传本身）
+ * 都看得见，不会出现「队列空着但文件还在传」的空窗。
  *
- * 空闲时不停止轮询但放慢到 8 秒一拍：任务可能由另一个标签页发起，本地没有
- * 任何事件能通知到这里，只能靠问。
+ * 空闲时不停止轮询但放慢到 8 秒一拍：任务可能由另一个标签页发起，本地没有任何
+ * 事件能通知到这里，只能靠问。
  */
 
 interface QueueItem {
@@ -74,12 +81,13 @@ export function QueuePanel() {
     return () => clearInterval(timer)
   }, [activeCount, tick])
 
-  // 一次任务都没有过时不渲染，别让侧边栏常驻一个空区块。
+  // 一次任务都没有过时不渲染。**不加「这里会显示任务」的占位**：等待期间人
+  // 看的是左栏那一批，右栏空着比空着一个说明区块干净。
   if (!loaded || items.length === 0) return null
 
   return (
-    <div className="mt-6 border-t border-neutral-800 pt-4">
-      <div className="flex items-center gap-1.5 px-2">
+    <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-3">
+      <div className="flex items-center gap-1.5">
         <p className="text-[11px] font-medium text-neutral-400">后台任务</p>
         {activeCount > 0 && (
           <span className="rounded-full bg-neutral-100 px-1.5 text-[10px] font-medium text-neutral-900">
@@ -88,9 +96,18 @@ export function QueuePanel() {
         )}
       </div>
 
-      <ul className="mt-2 space-y-2">
+      {/*
+        这一行是这个面板存在的全部理由：左栏只认这一批文件，这里认全量。
+        **不说「可以离开这个页面」**——那是指向自己的废话，而且当初就是因为
+        这句话才把它放错了地方。
+      */}
+      <p className="mt-1 text-[10px] leading-4 text-neutral-600">
+        这里的任务与左边那批文件是同一个来源，刷新页面后仍能看到
+      </p>
+
+      <ul className="mt-3 space-y-2.5">
         {items.map((it) => (
-          <li key={it.id} className="px-2">
+          <li key={it.id}>
             <div className="flex items-center gap-1.5">
               <span className="flex-none rounded bg-neutral-800 px-1 text-[10px] text-neutral-400">
                 {it.kind === 'image' ? '图' : '视频'}
@@ -128,16 +145,10 @@ export function QueuePanel() {
       </ul>
 
       {activeCount > 0 && (
-        <p className="mt-2 px-2 text-[10px] leading-4 text-neutral-700">
-          可以离开这个页面，任务在后台继续跑
+        <p className="mt-3 border-t border-neutral-800 pt-2 text-[10px] leading-4 text-neutral-700">
+          任务在服务端排队执行，处理是逐个来的，同时跑多个不会更快
         </p>
       )}
-      <Link
-        href="/ingest"
-        className="mt-2 block px-2 text-[10px] text-neutral-600 hover:text-neutral-400"
-      >
-        去入库页看详情
-      </Link>
     </div>
   )
 }

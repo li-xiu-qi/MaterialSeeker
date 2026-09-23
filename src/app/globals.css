@@ -1,1 +1,38 @@
 @import "tailwindcss";
+
+/**
+ * 主内容区的滚动条。**暗色页面上 Chrome 默认的 overlay 滚动条淡到几乎看不见。**
+ *
+ * 症状具体：页面明显还有内容在下面，用户却报告「没法滚动」。有一部分不是滚不动，
+ * 是没有任何视觉线索告诉他这里可以滚——深色背景上那条半透明细条与背景对比度极低，
+ * 不鼠标悬停上去根本不出现。滚动条是「此处有更多内容」唯一的常驻提示，工作台类
+ * 页面不能没有它。
+ *
+ * 只给 main 加，不给侧边栏与内部小列表加：侧边栏常驻不滚，逐字稿等小列表的
+ * 滚动条只会是噪音。
+ */
+
+main::-webkit-scrollbar {
+  width: 12px;
+}
+
+main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+main::-webkit-scrollbar-thumb {
+  background-color: #3f3f3f;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+main::-webkit-scrollbar-thumb:hover {
+  background-color: #5a5a5a;
+}
+
+/* Firefox 走另一套属性 */
+main {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f3f transparent;
+}

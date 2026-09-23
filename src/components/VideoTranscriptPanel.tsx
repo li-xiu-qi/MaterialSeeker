@@ -95,8 +95,19 @@ export function VideoTranscriptPanel({
         </div>
         <p className="mt-1 text-[11px] text-neutral-700">点句子跳到对应位置</p>
 
-        {/* 内部滚动：长逐字稿不该把下面的关键帧顶出首屏 */}
-        <ol className="mt-2 max-h-[26rem] space-y-0.5 overflow-y-auto rounded-md border border-neutral-800 p-1.5">
+        {/*
+          **不设内部滚动，列表自然增高，滚动统一交给页面。**
+
+          原来这里是 `max-h-[26rem] overflow-y-auto`，理由是「长逐字稿不该把下面的
+          关键帧顶出首屏」。实测它制造了一个更严重的问题：这个容器成了 scroll
+          chain 的边界。鼠标停在它上面拨滚轮时，滚轮被消费在这个容器里；而逐字稿
+          句数不多时（实测主力素材 13 句、2 句）容器根本不高，于是它滚不了、页面
+          也不滚，表现就是「拨滚轮页面完全不动」。用户报过这个现象。
+
+          逐字稿的用途是点句子跳转，浏览时由页面统一滚更符合直觉，也不该有两个
+          滚动目标抢控制权。真遇到几百句的长视频，页面变长是可接受的代价。
+        */}
+        <ol className="mt-2 space-y-0.5 rounded-md border border-neutral-800 p-1.5">
           {sentences.map((s, i) => {
             const active = activeMs === s.startMs
             return (

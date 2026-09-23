@@ -1,0 +1,29 @@
+# 统一用 LF。**这条是为了让 diff 反映真实改动。**
+#
+# 本仓在 Windows 上开发、部署到 Linux 跑，历史上没约定行尾，于是工作树里
+# 混着 CRLF 与 LF。后果具体且常见：改 5 行代码，diff 显示 780 增 830 删，
+# 因为整个文件的行尾都被换了一遍。行号也全被破坏，行号类断言天天假红。
+#
+# text=auto eol=lf 的含义是 git 在入库时统一转成 LF，检出时也给 LF。
+# 服务端（Linux）与开发端（Windows）从此拿到同一份字节。
+
+* text=auto eol=lf
+
+# 二进制与不需要行尾归一化的文件显式标出，免得被 text=auto 误伤。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.zip binary
+*.db binary
+*.db-journal binary
+
+# 这两类必须逐字节，行尾转换会改内容
+*.pth binary
+*.safetensors binary
+package-lock.json -diff

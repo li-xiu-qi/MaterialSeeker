@@ -4,6 +4,7 @@ import { PATHS } from './paths'
 import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
 import { chunkByScene, chunkFixed, chunkGreedy, type Sentence } from './chunking'
 import { clearServiceProgress, pollServiceProgress } from './serviceProgress'
+import { generateThumbs } from './thumbs'
 
 /**
  * 视频入库编排。四个步骤，每步的失败都单独可观测：
@@ -247,6 +248,11 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
     }
 
     stage('done', { done: 1, total: 1 })
+
+    // 帧缩略图也预热掉。帧是视频卡片封面的来源，一屏几张视频就是几个未命中的
+    // resize；理由与数字同图片入库那一处（未命中 107ms vs 命中 4-8ms）。
+    // 不 await：路由有按需生成的兜底，为缩略图让视频入库报错不划算。
+    void Promise.all(data.frames.map((f) => generateThumbs(f.path))).catch(() => {})
 
     return {
       assetId,

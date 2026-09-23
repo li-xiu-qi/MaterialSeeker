@@ -6,6 +6,7 @@ import { PATHS } from './paths'
 import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
 import { chunkGreedy } from './chunking'
 import { DEFAULT_COLLECTION_ID } from './collections'
+import { generateThumbs } from './thumbs'
 
 /**
  * 文本入库（M1 唯一打通的入库路径）。
@@ -133,6 +134,13 @@ export async function ingestImage(
     embeddingToBlob(imgVec),
     capVec ? embeddingToBlob(capVec) : null,
   )
+
+  // 顺手把缩略图预热掉。**此时不预热，这笔账就记在第一次浏览的人头上**：实测未命中
+  // 的 resize 是 107ms，命中是 4-8ms，差 15 倍；一次刷 24 张卡片就是二十多个未命中
+  // 并发，累积起来就是「素材库加载有点卡」。入库这条路径本来就要读原图，多产出三档
+  // 缩略图的总耗时增加有限。
+  // 不 await 失败：缩略图是优化项，路由那一侧有按需生成的兜底，为它中断入库不划算。
+  void generateThumbs(filePath).catch(() => {})
 
   return assetId
 }

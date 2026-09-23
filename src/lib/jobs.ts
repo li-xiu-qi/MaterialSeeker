@@ -1,4 +1,5 @@
 import { getDb } from './db'
+import { finishedWindowSql, finishedWindowArg } from './queueWindow'
 
 /**
  * 入库任务表。视频入库从「堵在 HTTP 请求里」改成「提交即返回、后台执行」后，
@@ -9,6 +10,10 @@ import { getDb } from './db'
  * 阶段进度分两层：本表记粗粒度 stage/percent，视频处理服务那边的细分进度
  * （抽帧 3/12、音频时长）由 ingestRunner 轮询后折算进 percent。
  */
+
+// 终态任务的可见时间窗，来源见 queueWindow。这里 re-export 是为了调用方
+// 不需要为了一个常数去 import 第二个文件。
+export { FINISHED_TTL_SECONDS } from './queueWindow'
 
 export type JobStatus =
   | 'uploading'
@@ -184,11 +189,18 @@ export function unfinishedJobIds(): number[] {
 }
 
 /**
- * 侧边栏队列要的数据：全部进行中的任务，外加最近几条已结束的（让人看到
- * 「刚才那几个成功了」而不必自己记住）。
+ * 入库页右栏队列要的数据：全部进行中的任务，外加**刚结束不久**的几条。
  *
- * 不按批次查：侧边栏是全局的，不知道当前批次是哪个；而「有没有任务在跑」
- * 这件事不该依赖用户正停在哪个页面。
+ * 「刚结束不久」由时间窗决定，见 queueWindow。这里曾写死「最近 5 条已结束」而
+ * 没有任何时间约束，后果是完成的任务一直挂在那里：队列本该是「现在有什么事」的
+ * 告示，不是历史记录，挂着的已完成条目会让下一次上传时用户分不清哪条是新的。
+ *
+ * 窗口是 SQL 条件而不是前端过滤，理由见 finishedWindowSql 的注释：finished_at 是
+ * 服务端写的本地时间字符串，交给 JS 解析在不同引擎下取值不一致，会算出差几个小时的
+ * 剩余时间，任务要么秒删要么永不消。
+ *
+ * 不按批次查：队列不知道当前批次是哪个，而「有没有任务在跑」不该依赖用户正停在
+ * 哪个页面。批次视角由入库页左栏的上传面板承担。
  */
 export function listQueue(activeLimit = 20, recentLimit = 5): JobRow[] {
   const db = getDb()
@@ -198,12 +210,14 @@ export function listQueue(activeLimit = 20, recentLimit = 5): JobRow[] {
        ORDER BY id ASC LIMIT ?`,
     )
     .all(activeLimit) as JobRow[]
+  const windowSql = finishedWindowSql()
   const recent = db
     .prepare(
       `SELECT * FROM ingest_jobs WHERE status IN ('done','error','canceled')
+       ${windowSql}
        ORDER BY id DESC LIMIT ?`,
     )
-    .all(recentLimit) as JobRow[]
+    .all(finishedWindowArg(), recentLimit) as JobRow[]
   // 进行中的在前（按提交顺序），已结束的在后（新的在前）
   return [...active, ...recent.reverse()]
 }
