@@ -103,7 +103,7 @@ export default async function VideoDetailPage({
 
       <div className="mt-6">
         <VideoTranscriptPanel
-          videoUrl={videoUrl}
+          mediaUrl={videoUrl}
           currentMs={currentMs}
           collectionId={collectionId}
           sentences={transcript?.sentences ?? []}

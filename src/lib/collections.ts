@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
 import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
+import { composeCaptionText, parseTags, serializeTags } from './tags'
 
 /**
  * 素材库（collection）的增删查与作用域。
@@ -139,7 +140,10 @@ export function deleteCollection(id: number): { removedAssets: number } {
  * 只删记录，不碰文件。
  */
 export function removeAssetRecords(db: Database, id: number, kind: string): void {
-  if (kind === 'video') {
+  // 音频与视频同样有逐字稿（transcripts/chunks/sentences），删的时候要一起清。
+  // **两者写在同一行是刻意的**：它们共用这三张表，分两条 if 写的结果是将来
+  // 给音频加第五种子表时只改一条，而漏改的那条不报错，只留下孤儿行。
+  if (kind === 'video' || kind === 'audio') {
     const tids = db.prepare('SELECT id FROM transcripts WHERE asset_id = ?').all(id) as Array<{
       id: number
     }>
@@ -159,6 +163,7 @@ export function removeAssetRecords(db: Database, id: number, kind: string): void
   }
   if (kind === 'image') db.prepare('DELETE FROM images WHERE asset_id = ?').run(id)
   if (kind === 'text') db.prepare('DELETE FROM text_notes WHERE asset_id = ?').run(id)
+  if (kind === 'audio') db.prepare('DELETE FROM audio_files WHERE asset_id = ?').run(id)
   db.prepare('DELETE FROM assets WHERE id = ?').run(id)
 }
 
@@ -404,26 +409,38 @@ export function scopeLabel(collectionId: number): string {
  * - 视频：没有「整片一个描述」这个字段。视频的描述在 frames.caption 上，是逐帧
  *   的，改一个不影响其他帧，所以不支持整片批量改；帧描述在各帧上单独改。
  *
+ * 三类素材都能整片改标签（tags 存 assets.tags_json，与 kind 无关）。视频帧上的
+ * 描述仍是逐帧的，不在这个入口。
+ *
  * 返回实际改了什么，调用方据此给反馈，不要一律显示「已保存」。
  */
 export async function updateAssetMeta(
   id: number,
-  patch: { title?: string; caption?: string },
-): Promise<{ title: boolean; caption: boolean }> {
+  patch: { title?: string; caption?: string; tags?: string[] },
+): Promise<{ title: boolean; caption: boolean; tags: boolean }> {
   const db = getDb()
-  const row = db.prepare('SELECT kind FROM assets WHERE id = ?').get(id) as
-    | { kind: string }
+  const row = db.prepare('SELECT kind, tags_json FROM assets WHERE id = ?').get(id) as
+    | { kind: string; tags_json: string | null }
     | undefined
   if (!row) throw new Error('素材不存在')
 
   let titleChanged = false
   let captionChanged = false
+  let tagsChanged = false
 
   const nextTitle = patch.title?.trim()
   if (nextTitle) {
     db.prepare('UPDATE assets SET title = ? WHERE id = ?').run(nextTitle, id)
     titleChanged = true
   }
+
+  const nextTags = patch.tags !== undefined ? parseTags(patch.tags) : null
+  if (nextTags) {
+    // 标签挂在 assets 上，三种素材通用（视频也能整片打标签，帧描述才是逐帧的）。
+    db.prepare('UPDATE assets SET tags_json = ? WHERE id = ?').run(serializeTags(nextTags), id)
+    tagsChanged = true
+  }
+  const curTags = nextTags ?? parseTags(row.tags_json)
 
   const nextCaption = patch.caption?.trim()
   if (nextCaption !== undefined) {
@@ -433,11 +450,13 @@ export async function updateAssetMeta(
         | undefined
       if (!cur) throw new Error('图片记录缺失')
       if ((cur.caption ?? '') !== nextCaption) {
-        // 空描述也要清掉向量：留着旧向量会让这条素材继续被旧描述命中
-        const vec = nextCaption
-          ? (await encodeBatch({
-              inputs: [{ modality: 'text', text: nextCaption, instruction: PASSAGE_INSTRUCTION }],
-            }))[0]
+        // **重编码的语料是描述加当前标签，不是描述自己**。只编码描述的结果是
+        // 改了描述之后标签词从语料里消失，之前靠标签搜得到的这条素材再也搜不到，
+        // 而这个故障没有任何提示，只会被当成「检索模型不行」。
+        const text = composeCaptionText(nextCaption, curTags)
+        // 空语料也要清掉向量：留着旧向量会让这条素材继续被旧语料命中
+        const vec = text
+          ? (await encodeBatch({ inputs: [{ modality: 'text', text, instruction: PASSAGE_INSTRUCTION }] }))[0]
           : null
         db.prepare('UPDATE images SET caption = ?, caption_embedding = ? WHERE asset_id = ?').run(
           nextCaption || null,
@@ -455,7 +474,13 @@ export async function updateAssetMeta(
         if (!nextCaption) throw new Error('正文不能为空')
         const vec = (
           await encodeBatch({
-            inputs: [{ modality: 'text', text: nextCaption, instruction: PASSAGE_INSTRUCTION }],
+            inputs: [
+              {
+                modality: 'text',
+                text: composeCaptionText(nextCaption, curTags),
+                instruction: PASSAGE_INSTRUCTION,
+              },
+            ],
           })
         )[0]
         db.prepare('UPDATE text_notes SET content = ?, embedding = ? WHERE asset_id = ?').run(
@@ -468,7 +493,34 @@ export async function updateAssetMeta(
     } else {
       throw new Error('视频没有整片描述可改，帧描述请在关键帧上单独编辑')
     }
+  } else if (nextTags) {
+    // 只改标签、没带描述：图片那一路照样要重编码，否则标签是纯摆设。
+    if (row.kind === 'image') {
+      const cur = db.prepare('SELECT caption FROM images WHERE asset_id = ?').get(id) as
+        | { caption: string | null }
+        | undefined
+      if (!cur) throw new Error('图片记录缺失')
+      const text = composeCaptionText(cur.caption, nextTags)
+      const vec = text
+        ? (await encodeBatch({ inputs: [{ modality: 'text', text, instruction: PASSAGE_INSTRUCTION }] }))[0]
+        : null
+      db.prepare('UPDATE images SET caption_embedding = ? WHERE asset_id = ?').run(
+        vec ? embeddingToBlob(vec) : null,
+        id,
+      )
+    } else if (row.kind === 'text') {
+      const cur = db.prepare('SELECT content FROM text_notes WHERE asset_id = ?').get(id) as
+        | { content: string }
+        | undefined
+      if (!cur) throw new Error('文本记录缺失')
+      const vec = await encodeBatch({
+        inputs: [
+          { modality: 'text', text: composeCaptionText(cur.content, nextTags), instruction: PASSAGE_INSTRUCTION },
+        ],
+      })
+      db.prepare('UPDATE text_notes SET embedding = ? WHERE asset_id = ?').run(embeddingToBlob(vec[0]), id)
+    }
   }
 
-  return { title: titleChanged, caption: captionChanged }
+  return { title: titleChanged, caption: captionChanged, tags: tagsChanged }
 }

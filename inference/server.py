@@ -8,6 +8,13 @@ VideoSeeker 推理服务。
 接口：
   GET  /health                      模型与维度自检
   POST /encode  {inputs: [...]}     批量编码
+  POST /caption                     一张图生成标题/描述/标签
+
+**/caption 与 /encode 是两套完全不同的能力，不要试图合并。** /encode 出向量，
+本地模型就够；/caption 要的是「这张图是什么」的自然语言，需要会看图会说话的视觉
+语言模型。本地那些 VL 模型虽然也能干，但要常驻几 GB 显存，而标注是偶发操作，为它
+常驻一个模型不划算。所以走在线的 GLM：按次计费、不占本地显存、效果还更好。
+密钥与模型名从环境变量读，缺省值对齐同一台机器上 SmartImager 已跑通的那套。
 
 instruction 是必需项。索引端与查询端必须带不同 instruction，
 调用方负责传，服务端不猜。缺省时用通用检索指令。
@@ -180,6 +187,167 @@ def encode(req: EncodeRequest) -> dict:
         raise HTTPException(500, "some inputs were not encoded")
 
     return {"embeddings": [r.model_dump() for r in result]}  # type: ignore[union-attr]
+
+
+class CaptionRequest(BaseModel):
+    """一张图生成标题、描述、标签。"""
+
+    image_path: str | None = None
+    image_b64: str | None = None
+
+
+# 生成用的提示词。**要求 JSON 而不是自由文本**，因为下游要把它拆成三个字段分别
+# 存（title/caption/tags），自由文本还得再让模型格式化一遍，多一次出错机会。
+#
+# 长度上限是刻意给的：标题 10 字是为了在列表卡片里不折行，描述 60 字是为了在
+# 详情页一行放得下，标签 5 个是为了不超过 MAX_TAGS 且每个都言之有物。
+# 不给上限的话模型会写成一段散文，塞不进界面，用户还得自己删。
+CAPTION_PROMPT = (
+    "请分析这张图片，只返回 JSON，不要任何解释或代码块标记："
+    '{"title": "简短标题，10字以内", '
+    '"description": "画面描述，60字以内，说清画面里有什么", '
+    '"tags": ["标签1", "标签2", "标签3"]}'
+    "标签用名词或短词，3到5个，不要句子。"
+)
+
+# 视觉模型与接口地址。**缺省值不是拍脑袋，是同一台机器上 SmartImager 已跑通的那套**，
+# 换模型或换供应商时改这两个环境变量即可，不必动代码。
+GLM_BASE_URL = os.environ.get("OPENAI_API_BASE", "https://open.bigmodel.cn/api/paas/v4")
+GLM_VISION_MODEL = os.environ.get("VISION_MODEL", "glm-4.6v-flash")
+
+
+@app.post("/caption")
+def caption(req: CaptionRequest) -> dict:
+    """用视觉语言模型给一张图生成标题、描述与标签。
+
+    图片三种来路都认：服务端路径、裸 base64、data URL。入库面板传 base64（本地
+    待命区的图还没落盘），素材库传路径（图已经在库里）。
+
+    **max_tokens 必须给够（2000）。** glm-4.6v 是 thinking 模型，推理过程也占
+    额度，给 10 个 token 时推理就把额度吃光，返回的 content 是空字符串，看起来
+    像模型坏了。实测 2000 下推理与正文都有。
+
+    **返回结构固定三字段**，解析失败也不抛 500：title 空、description 放模型原文
+    截断、tags 空。调用方据此判断「这次没成」，而不是让一次解析失败把整批标注
+    中断。
+    """
+    if not req.image_path and not req.image_b64:
+        raise HTTPException(404, "需要 image_path 或 image_b64")
+
+    b64 = req.image_b64
+    if not b64:
+        if not os.path.isfile(req.image_path):  # type: ignore[arg-type]
+            raise HTTPException(404, f"图片不存在: {req.image_path}")
+        with open(req.image_path, "rb") as f:  # type: ignore[arg-type]
+            b64 = base64.b64encode(f.read()).decode()
+
+    # data URL 只取逗号后面那段，否则 base64 解码会失败
+    if b64.startswith("data:"):
+        b64 = b64.split(",", 1)[1] if "," in b64 else ""
+
+    # 按扩展名猜 MIME，猜不出用 jpeg。GLM 侧对这两种都认，猜错不会失败。
+    mime = "image/jpeg"
+    if req.image_path:
+        low = req.image_path.lower()
+        if low.endswith(".png"):
+            mime = "image/png"
+        elif low.endswith(".webp"):
+            mime = "image/webp"
+        elif low.endswith(".gif"):
+            mime = "image/gif"
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        # 装 openai 包是部署步骤，不该在请求里才暴露成一堆 import 栈
+        raise HTTPException(503, "推理服务缺少 openai 依赖，无法调用视觉模型")
+
+    api_key = os.environ.get("GLM_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, "未配置 GLM_API_KEY，无法生成标注")
+
+    client = OpenAI(api_key=api_key, base_url=GLM_BASE_URL)
+    try:
+        resp = client.chat.completions.create(
+            model=GLM_VISION_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": CAPTION_PROMPT},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                    ],
+                }
+            ],
+            max_tokens=2000,
+            temperature=0.3,
+        )
+    except Exception as e:
+        # 上游限流、超时、鉴权失败都在这里。原文带给调用方，用户看到的是
+        # 「这次为什么没生成」，不是一句「生成失败」。
+        log.error("视觉模型调用失败: %s", e)
+        raise HTTPException(502, f"视觉模型调用失败: {e}")
+
+    msg = resp.choices[0].message
+    # thinking 模型可能把正文放在 reasoning_content 里（content 为空时）。
+    # 两处都兜，别在一种模型行为上赌。
+    raw = (msg.content or "").strip()
+    if not raw:
+        raw = (getattr(msg, "reasoning_content", None) or "").strip()
+    if not raw:
+        return {"title": "", "description": "", "tags": []}
+
+    return parse_caption(raw)
+
+
+def parse_caption(raw: str) -> dict:
+    """从模型输出里抠出 title/description/tags。
+
+    **不要求模型一定守规矩。** 它有时会套 ```json 代码块，有时前后带解释文字，
+    有时 JSON 是坏的。所以按「第一个 { 到最后一个 }」切，切出来再 json.loads，
+    失败了退化成「description 放原文」。这样坏输出只是描述质量差，不会让调用链断。
+    """
+    import json
+    import re
+
+    # 去掉代码块围栏。**不能只去首尾**：模型有时输出 ```json\n{...}\n```，
+    # 围栏在 JSON 两侧，正则一次清掉比切片稳妥。
+    cleaned = re.sub(r"```(?:json)?\s*", "", raw)
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            obj = json.loads(cleaned[start : end + 1])
+            if isinstance(obj, dict):
+                return {
+                    "title": str(obj.get("title") or "")[:120],
+                    "description": str(obj.get("description") or "")[:600],
+                    # tags 可能是字符串（模型偶尔把数组写成逗号串），两种都接
+                    "tags": normalize_tags(obj.get("tags")),
+                }
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+    return {"title": "", "description": raw[:600], "tags": []}
+
+
+def normalize_tags(v) -> list[str]:
+    """标签归一。模型给的可能是 list、逗号串、或干脆是 None。"""
+    if isinstance(v, list):
+        items = [str(x) for x in v]
+    elif isinstance(v, str):
+        import re
+
+        items = re.split(r"[,，;；]", v)
+    else:
+        return []
+    out: list[str] = []
+    for t in items:
+        t = t.strip()
+        if t and t not in out:
+            out.append(t)
+        if len(out) >= 12:
+            break
+    return out
 
 
 def to_out(vec, dim: int) -> EmbeddingOut:

@@ -41,7 +41,7 @@ export function CollectionScope({
   collections,
   currentId,
   preserve = {},
-  label = '检索范围',
+  label = '搜索范围',
   /** 新建成功后被建的那个库 id，由页面从 URL 的 made 参数读入 */
   justMadeId,
   justMadeName,

@@ -89,5 +89,20 @@ function publicJob(j: JobRow) {
     percent: j.percent,
     message: j.message,
     error: j.error,
+    // 入库成功后落地的素材 id。**透出来是为了让上传面板那一行能直接编辑**：
+    // 标签、标题、描述要在刚入库时改最顺，等用户想起去素材库翻，那一早忘了。
+    // 三种模态的 result_json 里都有它（见 ingestRunner 的三个分支）。
+    assetId: readAssetId(j),
+  }
+}
+
+/** 从 result_json 里取 assetId。坏 JSON 与缺字段都给 undefined，不影响其余字段。 */
+function readAssetId(j: JobRow): number | undefined {
+  if (!j.result_json) return undefined
+  try {
+    const r = JSON.parse(j.result_json) as { assetId?: unknown }
+    return typeof r.assetId === 'number' ? r.assetId : undefined
+  } catch {
+    return undefined
   }
 }

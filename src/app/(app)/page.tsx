@@ -1,8 +1,14 @@
 import { RECENT_LIMIT } from '@/lib/recent'
+import { ASSET_KINDS } from '@/lib/mediaKind'
 import { RESULT_PAGE, MAX_RESULT_SHOWN, resultParams } from '@/lib/searchPaging'
 import Link from 'next/link'
 import { search } from '@/lib/search'
-import { getRecentAssets, getLibraryCounts, type RecentAsset } from '@/lib/library'
+import {
+  getRecentAssets,
+  getLibraryCounts,
+  detailHrefFor,
+  type RecentAsset,
+} from '@/lib/library'
 import {
   listCollections,
   normalizeCollectionId,
@@ -36,11 +42,15 @@ export const dynamic = 'force-dynamic'
  * 「想想搜什么」不是一回事。
  */
 
+/**
+ * 类型筛选的选项。**「全部」+ ASSET_KINDS 派生**，不手写四种模态。
+ *
+ * 手写过一份，加音频时漏改它的后果是：音频能入库、能搜到，但筛选条上没有
+ * 「音频」这一项，用户以为音频不支持筛选。派生之后新增模态只改 mediaKind。
+ */
 const MODALITIES = [
   { value: 'all', label: '全部' },
-  { value: 'video', label: '视频' },
-  { value: 'image', label: '图片' },
-  { value: 'text', label: '文本' },
+  ...ASSET_KINDS.map((k) => ({ value: k.kind, label: k.label })),
 ] as const
 
 /**
@@ -65,13 +75,36 @@ function libQForResult(collectionId: number): string {
   return collectionId === ALL_COLLECTIONS ? 'all' : String(collectionId)
 }
 
-function seekHref(assetId: number, collectionId: number, startMs: number): string {
-  return `/library/video/${assetId}?t=${Math.floor(startMs / 1000)}&lib=${libParam(collectionId)}`
+/**
+ * 定位播放的落点。**视频与音频各一条**，同一套时间参数。
+ *
+ * 视频跳视频详情页而不是裸 mp4（理由见上面那段长注释），音频同理：跳音频详情页，
+ * 逐字稿在右手边，那一句高亮，?t= 让 <audio> 直接落在那个秒数。
+ *
+ * 用 detailHrefFor 而不是在这里再拼一次四种模态的分支：那个 helper 是唯一
+ * 事实源，这里再加一份的结果是加第五种模态时漏改它，而漏改不报错，只是
+ * 定位播放落到 404。
+ */
+function seekHref(
+  assetId: number,
+  collectionId: number,
+  startMs: number,
+  kind: string,
+): string {
+  return `${detailHrefFor(kind, assetId)}?t=${Math.floor(startMs / 1000)}&lib=${libParam(collectionId)}`
 }
 
+/**
+ * 最近入库卡片上的类型小字。**从 ASSET_KINDS 派生**，加模态不会漏。
+ *
+ * 早先这里手写三项，加音频时漏改的后果是卡片上那一行显示 undefined，而
+ * tsc 查不出来（Record 的键来自 RecentAsset['kind']，加模态时那个联合类型
+ * 一变，这里反而会报错——于是要么改这里，要么有人图省事把它改成 Partial）。
+ */
 const KIND_LABEL: Record<RecentAsset['kind'], string> = {
   video: '视频',
   image: '图片',
+  audio: '音频',
   text: '文本',
 }
 
@@ -146,10 +179,10 @@ export default async function HomePage({
               endMs: h.endMs,
               sentences: h.sentences.map((s) => ({
                 ...s,
-                seekHref: seekHref(h.assetId, collectionId, s.start_ms),
+                seekHref: seekHref(h.assetId, collectionId, s.start_ms, h.assetKind),
               })),
               videoUrl: toMediaUrl(h.assetPath),
-              seekHref: seekHref(h.assetId, collectionId, h.startMs),
+              seekHref: seekHref(h.assetId, collectionId, h.startMs, h.assetKind),
             },
           }
         }
@@ -249,7 +282,7 @@ export default async function HomePage({
             : 'rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900'
         }
       >
-        检索
+        搜索
       </button>
     </form>
   )
@@ -398,6 +431,22 @@ export default async function HomePage({
   // --- 结果态：检索栏在顶部 ---
   return (
     <div className="mx-auto max-w-4xl">
+      {/*
+        **结果态要有标题，落地态的「找点什么」不算。** 两者是不同性质的东西：
+        落地态那句是邀请第一次来的人动手，属于内容文案；结果态这里要回答的是
+        「我现在在哪个页面、这些结果是按什么来的」。改名前搜完之后页面上只有
+        一个框和一堆结果，没有任何字样说明自己还在搜索这一页，而导航写的
+        「搜索」与落地态标题又对不上，用户每次都得重新认。
+
+        说清查询词与条数，是因为结果多时要能一眼看出「这是按哪个词搜出来的」。
+      */}
+      <h1 className="text-2xl font-semibold">
+        搜索结果
+        <span className="ml-2 text-sm font-normal text-neutral-500">
+          「{query}」· {hitCount} 条
+        </span>
+      </h1>
+
       {form(false)}
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">

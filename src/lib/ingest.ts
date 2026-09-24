@@ -7,6 +7,7 @@ import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
 import { chunkGreedy } from './chunking'
 import { DEFAULT_COLLECTION_ID } from './collections'
 import { generateThumbs } from './thumbs'
+import { composeCaptionText, parseTags, serializeTags } from './tags'
 
 /**
  * 文本入库（M1 唯一打通的入库路径）。
@@ -98,30 +99,36 @@ export async function ingestImage(
   filePath: string,
   caption?: string,
   collectionId: number = DEFAULT_COLLECTION_ID,
+  tags: string[] = [],
 ): Promise<number> {
   const db = getDb()
+  const tagList = parseTags(tags)
+  // **标签拼进说明文本一起编码**，理由见 tags.ts。没有说明也没有标签时这路
+  // 向量仍是 NULL，检索侧按 IS NOT NULL 筛，行为与原来一致。
+  const captionText = composeCaptionText(caption, tagList)
 
   const inputs: Array<
     | { modality: 'image'; path: string }
     | { modality: 'text'; text: string; instruction: string }
   > = [{ modality: 'image', path: filePath }]
-  if (caption) {
-    inputs.push({ modality: 'text', text: caption, instruction: PASSAGE_INSTRUCTION })
+  if (captionText) {
+    inputs.push({ modality: 'text', text: captionText, instruction: PASSAGE_INSTRUCTION })
   }
   const vectors = await encodeBatch({ inputs })
   const imgVec = vectors[0]
-  const capVec = caption ? vectors[1] : null
+  const capVec = captionText ? vectors[1] : null
 
   const insertAsset = db
     .prepare(
-      'INSERT INTO assets (kind, title, source_path, meta_json, collection_id) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO assets (kind, title, source_path, meta_json, collection_id, tags_json) VALUES (?, ?, ?, ?, ?, ?)',
     )
     .run(
       'image',
       title,
       filePath,
-      JSON.stringify({ has_caption: Boolean(caption) }),
+      JSON.stringify({ has_caption: Boolean(caption), has_tags: tagList.length > 0 }),
       collectionId,
+      serializeTags(tagList),
     )
   const assetId = Number(insertAsset.lastInsertRowid)
 

@@ -6,6 +6,8 @@ import { ingestImage } from '@/lib/ingest'
 import { redirectBack } from '@/lib/redirect'
 import { ingestVideo } from '@/lib/ingestVideo'
 import { normalizeCollectionId } from '@/lib/collections'
+import { KINDS_BY_EXT } from '@/lib/mediaKind'
+import { ingestAudio } from '@/lib/ingestAudio'
 
 export const runtime = 'nodejs'
 export const maxDuration = 1800
@@ -27,8 +29,14 @@ export const maxDuration = 1800
  * 「会等很久」，别让用户以为页面卡死了。
  */
 
-const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'])
-const VIDEO_EXTS = new Set(['.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v', '.flv', '.ts'])
+/**
+ * 扩展名判断走 lib/mediaKind 的唯一一份映射，本路由不再自己抄一份 Set。
+ *
+ * 抄一份的代价已经付过：加音频时这里不认 mp3/wav/flac，而面板与 /api/upload
+ * 都认，于是无 JS 那条路上用户选个 mp3 会得到一句「不支持的格式」，而开了 JS
+ * 的同一个文件能进去。同一条链路两种结果，是最难查的那类不一致。
+ */
+const { IMAGE_EXTS, VIDEO_EXTS, AUDIO_EXTS } = KINDS_BY_EXT
 
 /** 结果通过 query 带回，页面按参数渲染，同样不需要 JS */
 function back(lib: number, params: Record<string, string>) {
@@ -42,6 +50,7 @@ function summary(
   lib: number,
   imgs: number,
   vids: number,
+  auds: number,
   failed: number,
   names: string[],
   errs: string[],
@@ -49,9 +58,10 @@ function summary(
   const shown = names.slice(0, 3).join('、')
   const more = names.length > 3 ? ` 等 ${names.length} 个` : ''
   return back(lib, {
-    count: String(imgs + vids),
+    count: String(imgs + vids + auds),
     imgs: String(imgs),
     vids: String(vids),
+    auds: String(auds),
     fail: String(failed),
     name: shown + more,
     // URL 长度有限，错误原因只留两条
@@ -60,8 +70,8 @@ function summary(
 }
 
 /** 落盘到 <dataDir>/<kind>/，重名自动加序号。返回服务端绝对路径。 */
-async function stageFile(file: File, isImage: boolean): Promise<string> {
-  const dir = isImage ? PATHS.imagesDir : PATHS.videosDir
+async function stageFile(file: File, kind: 'image' | 'video' | 'audio'): Promise<string> {
+  const dir = kind === 'image' ? PATHS.imagesDir : kind === 'video' ? PATHS.videosDir : PATHS.audiosDir
   await mkdir(dir, { recursive: true })
   const safeName = file.name.replace(/[^A-Za-z0-9._\-\u4e00-\u9fa5]/g, '_')
   let target = path.join(dir, safeName)
@@ -94,15 +104,21 @@ export async function POST(req: Request) {
   const collectionId = normalizeCollectionId(form.get('collectionId') as string | null)
   let imgs = 0
   let vids = 0
+  let auds = 0
   let failed = 0
   const names: string[] = []
   const errs: string[] = []
 
   for (const file of files) {
     const ext = path.extname(file.name).toLowerCase()
-    const isImage = IMAGE_EXTS.has(ext)
-    const isVideo = VIDEO_EXTS.has(ext)
-    if (!isImage && !isVideo) {
+    const kind: 'image' | 'video' | 'audio' | null = IMAGE_EXTS.has(ext)
+      ? 'image'
+      : VIDEO_EXTS.has(ext)
+        ? 'video'
+        : AUDIO_EXTS.has(ext)
+          ? 'audio'
+          : null
+    if (!kind) {
       failed += 1
       errs.push(`${file.name}: 不支持的格式 ${ext || '(无)'}`)
       continue
@@ -111,7 +127,7 @@ export async function POST(req: Request) {
     const safeName = file.name.replace(/[^A-Za-z0-9._\-\u4e00-\u9fa5]/g, '_')
     let target: string
     try {
-      target = await stageFile(file, isImage)
+      target = await stageFile(file, kind)
     } catch (e) {
       failed += 1
       errs.push(`${file.name}: 落盘失败`)
@@ -119,12 +135,15 @@ export async function POST(req: Request) {
     }
 
     try {
-      if (isImage) {
+      if (kind === 'image') {
         await ingestImage(safeName, target, undefined, collectionId)
         imgs += 1
-      } else {
+      } else if (kind === 'video') {
         await ingestVideo({ videoPath: target, title: safeName, collectionId })
         vids += 1
+      } else {
+        await ingestAudio({ audioPath: target, title: safeName, collectionId })
+        auds += 1
       }
       names.push(safeName)
     } catch (e) {
@@ -136,6 +155,6 @@ export async function POST(req: Request) {
   }
 
   // 全失败才当错误回；部分成功要如实报数，一句「失败」会把成功的也吞掉
-  if (imgs + vids === 0) return back(collectionId, { err: errs[0] || '入库失败' })
-  return summary(collectionId, imgs, vids, failed, names, errs)
+  if (imgs + vids + auds === 0) return back(collectionId, { err: errs[0] || '入库失败' })
+  return summary(collectionId, imgs, vids, auds, failed, names, errs)
 }

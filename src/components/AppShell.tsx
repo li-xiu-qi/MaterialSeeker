@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 /**
  * 应用外壳：左侧常驻导航 + 右侧主区。
  *
- * 三个入口是平级功能（检索是「找」、入库是「放」、素材库是「管」），不是父子关系，
+ * 三个入口是平级功能（搜索是「找」、入库是「放」、素材库是「管」），不是父子关系，
  * 所以放边栏而不是塞进某个页面的页首。选边栏的三个实际理由：
  * 一，回检索必须一步可达，素材库有一百多张图，返回链接埋在列表末尾等于没有；
  * 二，顶栏页签会把「去另一边」降级成次级操作；
@@ -28,8 +28,8 @@ import { usePathname } from 'next/navigation'
  */
 
 const NAV = [
-  { href: '/', label: '检索', hint: '按内容找素材' },
-  { href: '/ingest', label: '入库', hint: '添加图片与视频' },
+  { href: '/', label: '搜索', hint: '按内容找素材' },
+  { href: '/ingest', label: '入库', hint: '添加图片、视频、音频、文本' },
   { href: '/library', label: '素材库', hint: '浏览与管理' },
 ]
 
@@ -55,7 +55,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside className="fixed inset-y-0 left-0 flex w-60 flex-none flex-col border-r border-neutral-800 bg-neutral-950 px-4 py-6">
         <div className="px-2">
           <p className="text-base font-semibold text-neutral-100">VideoSeeker</p>
-          <p className="mt-0.5 text-[11px] text-neutral-600">多模态内容检索工作台</p>
+          <p className="mt-0.5 text-[11px] text-neutral-600">多模态内容搜索工作台</p>
         </div>
 
         <nav className="mt-6 space-y-1">

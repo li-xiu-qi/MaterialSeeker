@@ -5,7 +5,12 @@ import Link from 'next/link'
 import { fmtMs } from '@/lib/format'
 
 /**
- * 视频 + 逐字稿面板。**客户端组件，但 href 是真实的，JS 失效也能用。**
+ * 逐字稿面板。**客户端组件，但 href 是真实的，JS 失效也能用。**
+ *
+ * 视频与音频共用这一个组件：两者的内容都是「一条时间轴加一串句子」，交互都是
+ * 点句子跳到那一秒。差别只在播放器是 <video> 还是 <audio>，而那正是 kind 这个
+ * 参数唯一要做的事。为音频另写一份的结果是「点句跳转」的逻辑存在两处，改一处
+ * 忘一处时音频那边静默失效（不报错，只是点了不跳）。
  *
  * 语义布局：视频在左（宽、主位），逐字稿在右（窄、辅位）。
  * 判据不是「列表都放左边」这种惯性，而是三件事：
@@ -30,17 +35,21 @@ interface Sentence {
 }
 
 export function VideoTranscriptPanel({
-  videoUrl,
+  kind = 'video',
+  mediaUrl,
   sentences,
   currentMs,
   collectionId,
 }: {
-  videoUrl: string | null
+  kind?: 'video' | 'audio'
+  mediaUrl: string | null
   sentences: Sentence[]
   currentMs: number | null
   /** 检索要沿用当前素材库的作用域，不然点「检索」会跳到别的库 */
   collectionId: number
 }) {
+  // HTMLVideoElement 与 HTMLAudioElement 在这里用到的字段完全一致（currentTime、
+  // play），用一个 ref 类型即可，不必为音频再引一个。
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [activeMs, setActiveMs] = useState<number | null>(currentMs)
 
@@ -68,22 +77,36 @@ export function VideoTranscriptPanel({
     window.history.replaceState(null, '', `?t=${Math.floor(ms / 1000)}`)
   }
 
-  const seekSrc = videoUrl && currentMs !== null ? `${videoUrl}#t=${Math.floor(currentMs / 1000)}` : videoUrl
+  const seekSrc =
+    mediaUrl && currentMs !== null ? `${mediaUrl}#t=${Math.floor(currentMs / 1000)}` : mediaUrl
+
+  const player =
+    kind === 'audio' ? (
+      <audio
+        ref={videoRef}
+        src={seekSrc ?? undefined}
+        controls
+        preload="metadata"
+        className="w-full rounded-md border border-neutral-800 bg-neutral-900 p-3"
+      />
+    ) : (
+      <video
+        ref={videoRef}
+        src={seekSrc ?? undefined}
+        controls
+        preload="metadata"
+        className="w-full rounded-md border border-neutral-800 bg-black"
+      />
+    )
 
   return (
     <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_20rem]">
       <div className="min-w-0">
         {seekSrc ? (
-          <video
-            ref={videoRef}
-            src={seekSrc}
-            controls
-            preload="metadata"
-            className="w-full rounded-md border border-neutral-800 bg-black"
-          />
+          player
         ) : (
           <div className="flex h-40 items-center justify-center rounded-md border border-neutral-800 bg-neutral-900 text-xs text-neutral-600">
-            源文件不在库内，无法播放
+            {kind === 'audio' ? '音频文件不在库内，无法播放' : '源文件不在库内，无法播放'}
           </div>
         )}
       </div>

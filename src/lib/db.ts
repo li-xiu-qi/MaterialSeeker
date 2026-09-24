@@ -17,17 +17,145 @@ export function getDb(): Database.Database {
   db.pragma('busy_timeout = 5000')
   initSchema(db)
   migrateCollections(db)
+  migrateKinds(db)
+  initAudioFiles(db)
   return db
 }
 
 /**
- * 给存量库加 collection 列。
+ * 幂等迁移。目前两笔：
  *
- * CREATE TABLE IF NOT EXISTS 不会给已存在的表加列，所以这一步必须单独做，
- * 否则升级后旧库里 assets 没有 collection_id，所有按库过滤的 SQL 直接报错。
- * 做法：缺列就加（默认 1，指向默认库），确保默认库存在，再把游离行收编。
+ * 1. collection_id：旧库没有库的概念。CREATE TABLE IF NOT EXISTS 不会给已存在
+ *    的表加列，所以必须单独做，否则升级后旧库 assets 没有 collection_id，
+ *    所有按库过滤的 SQL 直接报错。做法：缺列就加（默认 1，指向默认库），
+ *    确保默认库存在，再把游离行收编。
+ * 2. tags_json：标签。同理，IF NOT EXISTS 不会补列，而标签入库与检索都读它。
+ *
  * 幂等，每次启动都跑，重复跑没有副作用。
  */
+/**
+ * 两张表的 kind 都放开为不限枚举（assets 与 ingest_jobs），并建 audio_files 表。
+ *
+ * **为什么重建表而不是 ALTER**：SQLite 的 ALTER TABLE 只能加列、不能改 CHECK，
+ * 而 kind 上原本挂着 `CHECK (kind IN ('video','image','text'))`，不加 audio
+ * 这一列就插不进音频素材。改 CHECK 只有重建一条路。
+ *
+ * **为什么不保留 CHECK 只把 audio 补进枚举**：加第五种模态时还要再重建一次。
+ * 重建父表的代价不是写这几行 DDL，是下面那一串 foreign_keys 开关与拷贝——四张
+ * 子表（transcripts/frames/images/text_notes）都 REFERENCES assets(id) ON DELETE
+ * CASCADE，而 **foreign_keys=ON 时 DROP 父表会级联清空子表**，这不是假设，是
+ * SQLite 文档写明的隐式 DELETE FROM 行为。所以重建必须关外键、包事务、再开回来，
+ * 少一步就是一次数据事故。为了少一次这种事故，枚举改由这里注释与 AssetKind
+ * 类型集中声明，CHECK 不再承担这件事。
+ *
+ * 幂等判据是 sqlite_master 里的建表 SQL 还含不含 CHECK：含就重建，不含就跳过。
+ * 每次启动都跑，正常启动第二次起都是空跑。
+ */
+function migrateKinds(d: Database.Database) {
+  const sqlOf = (name: string) =>
+    (
+      d.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) as
+        | { sql: string | null }
+        | undefined
+    )?.sql ?? ''
+
+  const needsAssets = sqlOf('assets').includes('CHECK')
+  const needsJobs = sqlOf('ingest_jobs').includes('CHECK')
+  // 两个判据分开，不能合成一个 if：只迁了 assets 而漏了 jobs 的状态是可能的
+  // （本次发布前的某个版本只处理了前者），那时 queue 会报 constraint failed，
+  // 而错因藏在一条已经跑过的迁移里，很难往回追。
+  if (!needsAssets && !needsJobs) return
+
+  // PRAGMA foreign_keys 在事务内是 no-op，必须在事务外设，且必须真的关掉——
+  // 见上面：ON 着 DROP 父表会清空四张子表。
+  d.pragma('foreign_keys = OFF')
+  try {
+    d.exec('BEGIN')
+    if (needsAssets) {
+      d.exec(`
+      CREATE TABLE assets_migrated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        source_path TEXT,
+        duration_ms INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        meta_json TEXT,
+        collection_id INTEGER NOT NULL DEFAULT 1,
+        tags_json TEXT NOT NULL DEFAULT '[]'
+      );
+      INSERT INTO assets_migrated
+        (id, kind, title, source_path, duration_ms, created_at, meta_json,
+         collection_id, tags_json)
+      SELECT id, kind, title, source_path, duration_ms, created_at, meta_json,
+             collection_id, COALESCE(tags_json, '[]')
+      FROM assets;
+      DROP TABLE assets;
+      ALTER TABLE assets_migrated RENAME TO assets;
+    `)
+    }
+    if (needsJobs) {
+      // ingest_jobs 没有子表引用它，DROP 不会连带清数据；仍放进同一个事务，
+      // 与 assets 一起成功或一起回滚，不留迁了一半的状态。
+      d.exec(`
+      CREATE TABLE ingest_jobs_migrated (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL,
+        file_path TEXT,
+        collection_id INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'queued',
+        stage TEXT NOT NULL DEFAULT 'queued',
+        percent INTEGER NOT NULL DEFAULT 0,
+        message TEXT NOT NULL DEFAULT '',
+        error TEXT,
+        result_json TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        started_at TEXT,
+        finished_at TEXT
+      );
+      INSERT INTO ingest_jobs_migrated
+        (id, batch_id, kind, title, file_path, collection_id, status, stage, percent,
+         message, error, result_json, created_at, updated_at, started_at, finished_at)
+      SELECT id, batch_id, kind, title, file_path, collection_id, status, stage, percent,
+             message, error, result_json, created_at, updated_at, started_at, finished_at
+      FROM ingest_jobs;
+      DROP TABLE ingest_jobs;
+      ALTER TABLE ingest_jobs_migrated RENAME TO ingest_jobs;
+    `)
+    }
+    d.exec('COMMIT')
+  } catch (e) {
+    // 回滚失败的极端情况下不能把连接留在半迁移状态：外键必须开回来，否则
+    // 之后所有删除都不再级联，而那个故障要等到有人发现子表有孤儿行才暴露。
+    d.exec('ROLLBACK')
+    throw e
+  } finally {
+    d.pragma('foreign_keys = ON')
+  }
+}
+
+/**
+ * 音频文件的落库表。**只有文件路径与时长**，其余全部复用视频那一套：
+ * transcripts（全文）、transcript_sentences（全片句流）、chunks + sentences
+ * （检索与句级定位）。音频没有「帧」这个中间层，也不需要——它的画面内容是零。
+ *
+ * 新表用 CREATE TABLE IF NOT EXISTS，这一笔不用重建父表，没有数据风险。
+ */
+function initAudioFiles(d: Database.Database) {
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS audio_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      duration_ms INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_audio_asset ON audio_files(asset_id);
+  `)
+}
+
 function migrateCollections(d: Database.Database) {
   const cols = d.prepare('PRAGMA table_info(assets)').all() as Array<{ name: string }>
   if (!cols.some((c) => c.name === 'collection_id')) {
@@ -35,18 +163,30 @@ function migrateCollections(d: Database.Database) {
   }
   d.prepare('INSERT OR IGNORE INTO collections (id, name) VALUES (1, ?)').run('默认库')
   d.prepare('UPDATE assets SET collection_id = 1 WHERE collection_id IS NULL OR collection_id = 0').run()
+
+  if (!cols.some((c) => c.name === 'tags_json')) {
+    // 默认 '[]' 而不是 NULL：读取侧 loadTags 对两种空都给 []，但 SQL 里做条件
+    // 判断时 NULL 要多写一层 IS NOT NULL，默认值让查询保持单形态。
+    d.exec("ALTER TABLE assets ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'")
+  }
 }
 
 function initSchema(d: Database.Database) {
   d.exec(`
+    /*
+      kind 不限枚举，合法取值见文件末尾的 AssetKind 与 migrateAssetKinds 的说明。
+      这里不写 CHECK 是刻意的：写了之后每加一种模态就要重建一次父表，而重建
+      要关外键、拷数据，是整库级别的风险操作。
+    */
     CREATE TABLE IF NOT EXISTS assets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL CHECK (kind IN ('video','image','text')),
+      kind TEXT NOT NULL,
       title TEXT NOT NULL,
       source_path TEXT,
       duration_ms INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-      meta_json TEXT
+      meta_json TEXT,
+      tags_json TEXT NOT NULL DEFAULT '[]'
     );
 
     CREATE TABLE IF NOT EXISTS transcripts (
@@ -199,3 +339,11 @@ export function cosineSim(a: Float32Array, b: Float32Array): number {
   if (na === 0 || nb === 0) return 0
   return dot / (Math.sqrt(na) * Math.sqrt(nb))
 }
+
+/**
+/**
+ * 素材模态。**定义在 mediaKind.ts**（那里不依赖 better-sqlite3，客户端组件
+ * 也需要它）。这里 re-export 只是为了让 `from '@/lib/db'` 的旧 import 不断，
+ * 新代码请直接 import mediaKind。
+ */
+export type { AssetKind } from './mediaKind'

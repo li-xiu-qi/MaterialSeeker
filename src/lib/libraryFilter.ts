@@ -12,6 +12,7 @@
 export interface LibraryCounts {
   video: number
   image: number
+  audio: number
   text: number
 }
 
@@ -27,11 +28,13 @@ export interface LibraryCounts {
 export interface LibraryHasMore {
   video: boolean
   image: boolean
+  audio: boolean
   text: boolean
 }
 
 export interface LibraryList {
   counts: LibraryCounts
+  /** 各类型在当前筛选下的命中总数。counts 是库内存量，这个受筛选影响 */
   total: LibraryCounts
   hasMore: LibraryHasMore
   /** true 表示这次没按库过滤，此时各行必须显示 collectionName */
@@ -45,6 +48,8 @@ export interface LibraryList {
     frames: number
     chunks: number
     sentences: number
+    /** 标签。三类都有，渲染时逐个小圆点，不占主文案的位置 */
+    tags: string[]
     collectionId: number
     collectionName: string
   }>
@@ -57,6 +62,7 @@ export interface LibraryList {
     caption: string | null
     hasVector: boolean
     hasCaptionVector: boolean
+    tags: string[]
     collectionId: number
     collectionName: string
   }>
@@ -68,13 +74,31 @@ export interface LibraryList {
     content: string
     chars: number
     hasVector: boolean
+    tags: string[]
+    collectionId: number
+    collectionName: string
+  }>
+  /**
+   * 音频。没有 frames 与封面图（没有画面内容），但有时长与转写统计。
+   * 播放位在素材详情页 /library/audio/<id>。
+   */
+  audio: Array<{
+    id: number
+    title: string
+    sourcePath: string | null
+    createdAt: string
+    durationMs: number
+    filePath: string | null
+    chunks: number
+    sentences: number
+    tags: string[]
     collectionId: number
     collectionName: string
   }>
 }
 
 export interface LibraryFilter {
-  kind?: 'video' | 'image' | 'text'
+  kind?: 'video' | 'image' | 'audio' | 'text'
   /** 标题与说明的模糊匹配，中文按子串走 LIKE，不依赖分词 */
   q?: string
 }

@@ -29,7 +29,7 @@ export const ACTIVE_STATUSES = ['uploading', 'queued', 'running'] as const
 export interface JobRow {
   id: number
   batch_id: string
-  kind: 'video' | 'image'
+  kind: 'video' | 'image' | 'audio'
   title: string
   file_path: string | null
   collection_id: number
@@ -47,7 +47,7 @@ export interface JobRow {
 
 export interface CreateJobInput {
   batchId: string
-  kind: 'video' | 'image'
+  kind: 'video' | 'image' | 'audio'
   title: string
   filePath?: string | null
   collectionId: number

@@ -55,7 +55,7 @@ export function TextIngestForm({
           type="submit"
           className="w-full rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900"
         >
-          入库这段文本
+          保存这段文本
         </button>
       </form>
     </section>

@@ -16,8 +16,9 @@
 import { getDb, cosineSim, blobToEmbedding, embeddingToBlob, VECTOR_DIM } from './db'
 import { encodeText } from './embed'
 import { DEFAULT_COLLECTION_ID, scopeClause, scopeArgs } from './collections'
+import type { AssetKind } from './db'
 
-export type ModalityFilter = 'all' | 'video' | 'image' | 'text'
+export type ModalityFilter = 'all' | 'video' | 'image' | 'audio' | 'text'
 
 export interface SentenceHit {
   start_ms: number
@@ -32,9 +33,18 @@ export interface ChunkHit {
   source: 'vector' | 'keyword'
   assetId: number
   assetTitle: string
-  /** 视频文件路径，前端定位播放用；文本笔记没有对应文件，为 null */
+  /**
+   * 媒体文件路径。视频是 mp4、音频是 mp3/wav，前端据此选 <video> 还是
+   * <audio>；文本笔记没有对应文件，为 null。
+   *
+   * **同一条 chunk 路视频与音频共用**，两者的检索语料都是逐字稿 chunk，SQL 与
+   * 合并逻辑完全相同，只有渲染与定位播放用的标签不同。早先这里叫 videoPath，
+   * 加音频时若另开一路只是把同一段代码抄两份，其中一份将来改了另一份不跟着改。
+   */
   assetPath: string | null
-  /** 该素材最早一帧的缩略图，用作视频卡片封面 */
+  /** 该素材的模态。**chunk 路的两种来源靠它区分**，渲染与定位播放都要用 */
+  assetKind: AssetKind
+  /** 该素材最早一帧的缩略图，用作视频卡片封面；音频与文本为 null（没有帧） */
   coverFrame: string | null
   chunkText: string
   startMs: number
@@ -109,13 +119,16 @@ export async function search(
 
   const hits: SearchHit[] = []
 
-  // --- 路 3：逐字稿块向量 ---
-  if (modality === 'all' || modality === 'video') {
+  // --- 路 3：逐字稿块向量（视频与音频共用）---
+  // 音频的检索语料与视频同构：都是 chunks + sentences + transcripts，区别只在
+  // 音频没有 frames。**不为音频单开一路**，理由见 ChunkHit.assetKind 的注释。
+  if (modality === 'all' || modality === 'video' || modality === 'audio') {
     const [qVec] = await encodeText(query, 'query')
     const rows = db
       .prepare(
         `SELECT c.id, c.text, c.start_ms, c.end_ms, c.embedding,
                 a.id AS asset_id, a.title, a.source_path AS asset_path,
+                a.kind AS asset_kind,
                 (SELECT f.thumb_path FROM frames f WHERE f.asset_id = a.id
                   ORDER BY f.timestamp_ms LIMIT 1) AS cover_frame
          FROM chunks c JOIN transcripts t ON t.id = c.transcript_id
@@ -131,6 +144,7 @@ export async function search(
       asset_id: number
       title: string
       asset_path: string | null
+      asset_kind: string
       cover_frame: string | null
     }>
 
@@ -151,6 +165,7 @@ export async function search(
         assetId: r.asset_id,
         assetTitle: r.title,
         assetPath: r.asset_path,
+        assetKind: (r.asset_kind === 'audio' ? 'audio' : 'video') as AssetKind,
         coverFrame: r.cover_frame,
         chunkText: r.text,
         startMs: r.start_ms,
@@ -263,7 +278,7 @@ export async function search(
   // ANN 各命中 1 条）。中文关键词检索需要建索引侧接分词（jieba 一类的
   // 候选），未落地前这条路对中文等于不存在，见 PRD 开放问题 6。
   // 不要把「四路合并」当成四路都有效，现在是三路有效。
-  if (modality === 'all' || modality === 'video') {
+  if (modality === 'all' || modality === 'video' || modality === 'audio') {
     let ftsQuery = query
       .split(/\s+/)
       .filter(Boolean)
@@ -276,6 +291,7 @@ export async function search(
                   a.source_path AS asset_path,
                   (SELECT f.thumb_path FROM frames f WHERE f.asset_id = a.id
                     ORDER BY f.timestamp_ms LIMIT 1) AS cover_frame,
+                  a.kind AS asset_kind,
                   bm25(chunks_fts) AS rank
            FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
            JOIN transcripts t ON t.id = c.transcript_id
@@ -291,6 +307,7 @@ export async function search(
         asset_id: number
         title: string
         asset_path: string | null
+        asset_kind: string
         cover_frame: string | null
         rank: number
       }>
@@ -306,6 +323,7 @@ export async function search(
           assetId: r.asset_id,
           assetTitle: r.title,
           assetPath: r.asset_path,
+          assetKind: (r.asset_kind === 'audio' ? 'audio' : 'video') as AssetKind,
           coverFrame: r.cover_frame,
           chunkText: r.text,
           startMs: r.start_ms,

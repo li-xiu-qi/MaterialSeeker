@@ -1,6 +1,7 @@
 import { getDb } from './db'
 import { toMediaUrl } from './media'
 import { scopeClause, scopeArgs, ALL_COLLECTIONS } from './collections'
+import { loadTags } from './tags'
 import {
   libraryWhere,
   MAX_PAGE,
@@ -64,6 +65,37 @@ export interface TextDetail {
   }
 }
 
+/**
+ * 音频详情。**没有 frames 那一层**：音频没有帧，也不需要（画面信息为零）。
+ * 其余结构与 VideoDetail 一致，逐字稿、句流、检索块全部复用视频那套表。
+ */
+export interface AudioDetail {
+  asset: {
+    id: number
+    title: string
+    sourcePath: string | null
+    createdAt: string
+    meta: Record<string, unknown>
+  }
+  audioUrl: string | null
+  durationMs: number | null
+  /** 标签。从 assets.tags_json 读，不放在 meta_json 里（那栏存的是入库统计） */
+  tags: string[]
+  transcript: {
+    fullText: string
+    language: string | null
+    asrEngine: string | null
+    sentences: Array<{ startMs: number; endMs: number; text: string }>
+    chunks: Array<{
+      id: number
+      startMs: number
+      endMs: number
+      strategy: string
+      sentenceCount: number
+    }>
+  } | null
+}
+
 export interface VideoDetail {
   asset: {
     id: number
@@ -108,13 +140,14 @@ export function getLibraryCounts(collectionId: number = ALL_COLLECTIONS): Librar
   return {
     video: countKind(db, 'video', scope, scopeArg),
     image: countKind(db, 'image', scope, scopeArg),
+    audio: countKind(db, 'audio', scope, scopeArg),
     text: countKind(db, 'text', scope, scopeArg),
   }
 }
 
 function countKind(
   db: ReturnType<typeof getDb>,
-  kind: 'video' | 'image' | 'text',
+  kind: 'video' | 'image' | 'audio' | 'text',
   scope: string,
   scopeArg: unknown[],
 ): number {
@@ -224,7 +257,7 @@ export function getLibraryList(
    * counts 不受影响：那是库内存量，始终全量算，页面顶部那行说的是库里有什么。
 
    */
-  const wanted = (k: 'video' | 'image' | 'text') => !query.kind || query.kind === k
+  const wanted = (k: 'video' | 'image' | 'audio' | 'text') => !query.kind || query.kind === k
   const EMPTY_PAGE = { rows: [], total: 0 }
 
   const video = wanted('video')
@@ -237,6 +270,7 @@ export function getLibraryList(
     chunks: number
     sentences: number
     cover: string | null
+    tags_json: string | null
     collection_id: number
     collection_name: string
   }>(
@@ -254,6 +288,7 @@ export function getLibraryList(
               WHERE t.asset_id = a.id) AS sentences,
             (SELECT f2.thumb_path FROM frames f2 WHERE f2.asset_id = a.id
               ORDER BY f2.timestamp_ms LIMIT 1) AS cover,
+            a.tags_json,
             a.collection_id, c.name AS collection_name
      FROM assets a JOIN collections c ON c.id = a.collection_id
      WHERE a.kind = 'video' ${scope} ${where.sql} ORDER BY a.id DESC`,
@@ -273,6 +308,7 @@ export function getLibraryList(
     media_path: string | null
     has_vec: number
     has_caption_vec: number
+    tags_json: string | null
     collection_id: number
     collection_name: string
   }>(
@@ -283,7 +319,7 @@ export function getLibraryList(
     where.args,
     limit,
     `SELECT a.id, a.title, a.source_path, a.created_at, a.collection_id,
-            c.name AS collection_name, im.caption,
+            c.name AS collection_name, im.caption, a.tags_json,
             COALESCE(im.file_path, a.source_path) AS media_path,
             (im.embedding IS NOT NULL) AS has_vec,
             (im.caption_embedding IS NOT NULL) AS has_caption_vec
@@ -306,6 +342,7 @@ export function getLibraryList(
     content: string
     chars: number
     has_vec: number
+    tags_json: string | null
     collection_id: number
     collection_name: string
   }>(
@@ -317,6 +354,7 @@ export function getLibraryList(
     limit,
     `SELECT a.id, a.title, a.source_path, a.created_at, a.collection_id,
             c.name AS collection_name, n.content, length(n.content) AS chars,
+            a.tags_json,
             (n.embedding IS NOT NULL) AS has_vec
      FROM assets a JOIN text_notes n ON n.asset_id = a.id
      JOIN collections c ON c.id = a.collection_id
@@ -328,13 +366,57 @@ export function getLibraryList(
     )
     : EMPTY_PAGE
 
+  // --- 音频段。字段比视频少两个：没有帧数与关键帧封面 ---
+  const audio = wanted('audio')
+    ? page<{
+    id: number
+    title: string
+    source_path: string | null
+    created_at: string
+    duration_ms: number | null
+    file_path: string | null
+    chunks: number
+    sentences: number
+    tags_json: string | null
+    collection_id: number
+    collection_name: string
+  }>(
+    db,
+    scope,
+    scopeArg,
+    where.sql,
+    where.args,
+    limit,
+    `SELECT a.id, a.title, a.source_path, a.created_at, a.duration_ms,
+            au.file_path, a.tags_json,
+            (SELECT count(*) FROM chunks c JOIN transcripts t ON t.id = c.transcript_id
+              WHERE t.asset_id = a.id) AS chunks,
+            (SELECT count(*) FROM transcript_sentences s JOIN transcripts t ON t.id = s.transcript_id
+              WHERE t.asset_id = a.id) AS sentences,
+            a.collection_id, c.name AS collection_name
+     FROM assets a JOIN audio_files au ON au.asset_id = a.id
+     JOIN collections c ON c.id = a.collection_id
+     WHERE a.kind = 'audio' ${scope} ${where.sql} ORDER BY a.id DESC`,
+      `SELECT count(*) AS n
+       FROM assets a JOIN audio_files au ON au.asset_id = a.id
+       JOIN collections c ON c.id = a.collection_id
+       WHERE a.kind = 'audio' ${scope} ${where.sql}`,
+    )
+    : EMPTY_PAGE
+
   return {
     allCollections: collectionId === ALL_COLLECTIONS,
     counts,
-    total: { video: video.total, image: image.total, text: text.total },
+    total: {
+      video: video.total,
+      image: image.total,
+      audio: audio.total,
+      text: text.total,
+    },
     hasMore: {
       video: video.rows.length < video.total,
       image: image.rows.length < image.total,
+      audio: audio.rows.length < audio.total,
       text: text.rows.length < text.total,
     },
     video: video.rows.map((v) => ({
@@ -348,6 +430,7 @@ export function getLibraryList(
       frames: v.frames,
       chunks: v.chunks,
       sentences: v.sentences,
+      tags: loadTags(v.tags_json),
     })),
     image: image.rows.map((im) => ({
       id: im.id,
@@ -360,6 +443,22 @@ export function getLibraryList(
       caption: im.caption,
       hasVector: Boolean(im.has_vec),
       hasCaptionVector: Boolean(im.has_caption_vec),
+      tags: loadTags(im.tags_json),
+    })),
+    audio: audio.rows.map((au) => ({
+      id: au.id,
+      collectionId: au.collection_id,
+      collectionName: au.collection_name,
+      title: au.title,
+      sourcePath: au.source_path,
+      createdAt: au.created_at,
+      // 时长给音频播放器与卡片上的时长位；NULL 时前端显示 0:00，不显示「未知」——
+      // 一个空时长几乎只发生在零句转写，那时显示未知比显示 0:00 更让人困惑。
+      durationMs: au.duration_ms ?? 0,
+      filePath: au.file_path,
+      chunks: au.chunks,
+      sentences: au.sentences,
+      tags: loadTags(au.tags_json),
     })),
     text: text.rows.map((t) => ({
       id: t.id,
@@ -373,6 +472,7 @@ export function getLibraryList(
       // 清空**：空串与「没改」在 PATCH 里不是一回事，见 LibraryEditButton。
       content: t.content,
       hasVector: Boolean(t.has_vec),
+      tags: loadTags(t.tags_json),
     })),
   }
 }
@@ -443,6 +543,113 @@ export function getImageDetail(id: number): ImageDetail | null {
     },
     url: toMediaUrl(row.file_path),
     neighbours,
+  }
+}
+
+/**
+ * 音频详情。文件路径从 audio_files 取，duration 从 assets.duration_ms 取。
+ *
+ * 逐字稿那一套直接照搬视频的查询：transcripts / transcript_sentences / chunks
+ * 三张表都按 asset_id 关联，与 kind 无关。这也是 ingestAudio 只写这三张表的
+ * 原因，读侧因此不需要为音频写第二套。
+ */
+export function getAudioDetail(id: number): AudioDetail | null {
+  const db = getDb()
+  const asset = db
+    .prepare(
+      'SELECT id, kind, title, source_path, duration_ms, created_at, meta_json, tags_json FROM assets WHERE id = ?',
+    )
+    .get(id) as
+    | {
+        id: number
+        kind: string
+        title: string
+        source_path: string | null
+        duration_ms: number | null
+        created_at: string
+        meta_json: string | null
+        tags_json: string | null
+      }
+    | undefined
+
+  if (!asset || asset.kind !== 'audio') return null
+
+  const file = db
+    .prepare('SELECT file_path, duration_ms FROM audio_files WHERE asset_id = ?')
+    .get(id) as { file_path: string | null; duration_ms: number | null } | undefined
+
+  const transcript = db
+    .prepare('SELECT full_text, language, asr_engine FROM transcripts WHERE asset_id = ?')
+    .get(id) as
+    | { full_text: string; language: string | null; asr_engine: string | null }
+    | undefined
+
+  let sentences: Array<{ start_ms: number; end_ms: number; text: string }> = []
+  let chunks: Array<{
+    id: number
+    start_ms: number
+    end_ms: number
+    text: string
+    chunk_strategy: string
+    sent_count: number
+  }> = []
+
+  if (transcript) {
+    sentences = db
+      .prepare(
+        `SELECT s.start_ms, s.end_ms, s.text FROM transcript_sentences s
+         JOIN transcripts t ON t.id = s.transcript_id WHERE t.asset_id = ?
+         ORDER BY s.start_ms`,
+      )
+      .all(id) as Array<{ start_ms: number; end_ms: number; text: string }>
+
+    chunks = db
+      .prepare(
+        `SELECT c.id, c.start_ms, c.end_ms, c.text, c.chunk_strategy,
+                (SELECT count(*) FROM sentences sn WHERE sn.chunk_id = c.id) AS sent_count
+         FROM chunks c JOIN transcripts t ON t.id = c.transcript_id WHERE t.asset_id = ?
+         ORDER BY c.chunk_index`,
+      )
+      .all(id) as Array<{
+      id: number
+      start_ms: number
+      end_ms: number
+      text: string
+      chunk_strategy: string
+      sent_count: number
+    }>
+  }
+
+  return {
+    asset: {
+      id: asset.id,
+      title: asset.title,
+      sourcePath: asset.source_path,
+      createdAt: asset.created_at,
+      meta: asset.meta_json ? (JSON.parse(asset.meta_json) as Record<string, unknown>) : {},
+    },
+    audioUrl: toMediaUrl(file?.file_path ?? null),
+    durationMs: file?.duration_ms ?? asset.duration_ms,
+    tags: loadTags(asset.tags_json),
+    transcript: transcript
+      ? {
+          fullText: transcript.full_text,
+          language: transcript.language,
+          asrEngine: transcript.asr_engine,
+          sentences: sentences.map((s) => ({
+            startMs: s.start_ms,
+            endMs: s.end_ms,
+            text: s.text,
+          })),
+          chunks: chunks.map((c) => ({
+            id: c.id,
+            startMs: c.start_ms,
+            endMs: c.end_ms,
+            strategy: c.chunk_strategy,
+            sentenceCount: c.sent_count,
+          })),
+        }
+      : null,
   }
 }
 
@@ -577,7 +784,7 @@ function cosine(a: Float32Array, b: Float32Array): number {
 
 export interface RecentAsset {
   id: number
-  kind: 'video' | 'image' | 'text'
+  kind: 'video' | 'image' | 'audio' | 'text'
   title: string
   caption: string | null
   createdAt: string
@@ -585,6 +792,20 @@ export interface RecentAsset {
   thumbUrl: string | null
   /** 详情页地址，三种模态各自一条 */
   detailHref: string
+}
+
+/**
+ * 素材详情页地址。**四种模态各一条，加模态只改这里。**
+ *
+ * 曾有三处各写一遍（最近入库、结果列表、素材库列表），加模态时漏一处的表现是
+ * 那一类素材在某个列表里点不动——不是报错，是链接指向一个不存在的路由，浏览器
+ * 给 404。
+ */
+export function detailHrefFor(kind: string, id: number): string {
+  if (kind === 'video') return `/library/video/${id}`
+  if (kind === 'image') return `/library/image/${id}`
+  if (kind === 'audio') return `/library/audio/${id}`
+  return `/library/text/${id}`
 }
 
 /**
@@ -598,15 +819,17 @@ export interface RecentAsset {
 export function getRecentAssets(
   collectionId: number,
   limit = 12,
-  kind?: 'video' | 'image' | 'text',
+  kind?: 'video' | 'image' | 'audio' | 'text',
 ): RecentAsset[] {
   const db = getDb()
   const rows = db
     .prepare(
       `SELECT a.id, a.kind, a.title, a.created_at, im.caption, im.file_path,
+              au.file_path AS audio_path,
               (SELECT f.thumb_path FROM frames f WHERE f.asset_id = a.id
                 ORDER BY f.timestamp_ms LIMIT 1) AS cover
        FROM assets a LEFT JOIN images im ON im.asset_id = a.id
+       LEFT JOIN audio_files au ON au.asset_id = a.id
        WHERE 1 = 1 ${scopeClause(collectionId)} ${kind ? 'AND a.kind = ?' : ''}
        ORDER BY a.id DESC LIMIT ?`,
     )
@@ -617,24 +840,24 @@ export function getRecentAssets(
     created_at: string
     caption: string | null
     file_path: string | null
+    audio_path: string | null
     cover: string | null
   }>
 
   return rows.map((r) => {
-    const thumb = r.kind === 'video' ? r.cover : r.file_path
+    // 音频没有缩略图，thumbUrl 为 null。**不拿音频波形图冒充封面**：那要额外
+    // 解码一次音频文件，而卡片上那一小块只是提示「库里有什么」，为它付一次
+    // ffmpeg 调用不划算。音频卡片在列表里靠时长与句数表达自己。
+    const thumb = r.kind === 'video' ? r.cover : r.kind === 'image' ? r.file_path : null
     return {
       id: r.id,
       kind: r.kind as RecentAsset['kind'],
       title: r.title,
       caption: r.caption,
       createdAt: r.created_at,
-      thumbUrl: toMediaUrl(thumb),
-      detailHref:
-        r.kind === 'video'
-          ? `/library/video/${r.id}`
-          : r.kind === 'image'
-            ? `/library/image/${r.id}`
-            : `/library?lib=${collectionId === ALL_COLLECTIONS ? 'all' : collectionId}`,
+      thumbUrl: thumb ? toMediaUrl(thumb) : null,
+      audioPath: r.audio_path,
+      detailHref: detailHrefFor(r.kind, r.id),
     }
   })
 }

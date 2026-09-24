@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 /**
@@ -205,43 +205,50 @@ describe('禁则：正文里的下拉框必须滚轮友好', () => {
 })
 
 /**
- * 后台任务队列的落位。**它属于入库页，不属于导航侧边栏。**
+ * 后台任务队列已经不存在独立的 UI。**这条守卫防它被重新引回来。**
  *
- * 真实事故：QueuePanel 先在全局导航侧边栏挂过一段时间，理由是「任务进度只存在在
- * 发起它的那个页面，用户切走就看不见，而长任务等待期间去干点别的是正当需求」。
- * 用户直接指出层级错了。这个理由站不住的地方在于：真正的等待发生在入库页，人在
- * 那里等，左栏上传面板就有实时进度；切走页面是少数情况，而为少数情况把一块与导航
- * 无关的内容常驻在全局导航里，代价是每次打开应用都看见它，而它对检索页与素材库页
- * 毫无意义。
+ * 三段历史，按顺序：
  *
- * 守卫同时防两种复犯：一是它被搬回 AppShell，二是它被复制出第二份。
+ * 1. QueuePanel 先在全局导航侧边栏挂过一段时间。用户指出层级错了：真正的等待
+ *    发生在入库页，人在那里等，左栏上传面板就有实时进度；为少数情况把一块与导航
+ *    无关的内容常驻在全局导航里，代价是每次打开应用都看见它。
+ * 2. 挪进入库页右栏之后问题还在。它与左栏上传面板显示的是同一批任务，只是口径
+ *    不同（左栏只认本次选的，右栏认服务端全量），要靠一句「这里的任务与左边那批
+ *    文件是同一个来源」来解释。用户直说这部分逻辑混乱。
+ * 3. 最终把右栏整个删掉，它唯一独有的价值（刷新页面后任务还在）并进左栏：面板
+ *    挂载时从服务端把未完成的任务恢复成行。一处显示、刷新不丢，也没有第二套
+ *    口径要解释。
+ *
+ * 所以现在任何文件都不该 import QueuePanel。这条守卫同时覆盖三种复犯：搬回导航
+ * 侧边栏、在入库页重建右栏、以及复制出第二份队列面板。
  */
-describe('后台任务队列的落位', () => {
-  it('只在一个地方被 import，且那个地方是入库页', () => {
-    // **查 import 而不是查 <QueuePanel /> 渲染。** 两边各有漏法：只查渲染，
-    // 「加了 import 但还没接上」的半成品发现不了；只查 import，重复定义可能被漏。
-    // import 侧更能说明意图——文件里有它，就是打算在这一页用它。
+describe('后台任务队列不再有独立 UI', () => {
+  it('没有任何源码文件 import QueuePanel', () => {
+    // 查 import 而不是查渲染：「加了 import 还没接上」的半成品也算复犯，
+    // 而它是下一步就会接上的那个状态。
     //
-    // 注释行不经剥离线：解释这段历史时必然会提到它曾在哪，逐字匹配必然恒红。
+    // 注释行不剥：解释这段历史必然提到 QueuePanel 这个名字，逐字匹配会恒红。
+    // 只匹配 import 行本身就够了，注释里不会出现 import 语句。
     const importers: string[] = []
     for (const file of walk(SRC)) {
       if (file.includes('.test.')) continue
       const lines = readFileSync(file, 'utf8').split('\n')
-      const used = lines.some(
-        (l) => !/^\s*\*(\s|$)/.test(l) && /^\s*import[^\n]*QueuePanel/.test(l),
-      )
+      const used = lines.some((l) => /^\s*import[^\n]*QueuePanel/.test(l))
       if (used) importers.push(relative(SRC, file))
     }
-    expect(importers).toEqual(['app/(app)/ingest/page.tsx'])
+    expect(importers).toEqual([])
   })
 
-  it('导航外壳不碰它', () => {
-    const shell = readFileSync(join(SRC, 'components/AppShell.tsx'), 'utf8')
-    const code = shell
-      .split('\n')
-      .filter((l) => !/^\s*\*(\s|$)/.test(l) && !/^\s*\/\//.test(l))
-      .join('\n')
-    expect(code).not.toContain('QueuePanel')
+  it('组件文件本身也已删除', () => {
+    expect(existsSync(join(SRC, 'components/QueuePanel.tsx'))).toBe(false)
+  })
+
+  it('刷新后恢复任务的逻辑落在上传面板里', () => {
+    // 反向验证：删掉队列不是为了删掉这个能力。恢复逻辑必须在，否则刷新即丢进度，
+    // 而视频与音频是分钟级，那正是用户当初要右栏的原因。
+    const code = readFileSync(join(SRC, 'components/UploadPanel.tsx'), 'utf8')
+    expect(code).toContain('restoredRef')
+    expect(code).toContain('/api/ingest/jobs?queue=1')
   })
 })
 

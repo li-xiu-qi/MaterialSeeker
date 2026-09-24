@@ -1,8 +1,12 @@
 import Link from 'next/link'
 import { TextIngestForm } from '@/components/TextIngestForm'
 import { UploadPanel } from '@/components/UploadPanel'
-import { QueuePanel } from '@/components/QueuePanel'
 import { listCollections, normalizeCollectionId, getCollection } from '@/lib/collections'
+import { ASSET_KINDS } from '@/lib/mediaKind'
+import type { AssetKind } from '@/lib/mediaKind'
+
+/** 有文件的三种模态。文本没有文件，不进这个循环，见下面 JSX 的注释。 */
+const FILE_KINDS = ['video', 'image', 'audio'] as const
 
 export const dynamic = 'force-dynamic'
 
@@ -24,9 +28,11 @@ export default async function IngestPage({
 }: {
   searchParams: Promise<{
     lib?: string
+    k?: string
     count?: string
     imgs?: string
     vids?: string
+    auds?: string
     fail?: string
     failDetail?: string
     name?: string
@@ -39,9 +45,11 @@ export default async function IngestPage({
 }) {
   const {
     lib,
+    k,
     count,
     imgs,
     vids,
+    auds,
     fail,
     failDetail,
     name,
@@ -55,16 +63,30 @@ export default async function IngestPage({
   const currentId = normalizeCollectionId(lib)
   const current = getCollection(currentId)
 
+  /**
+   * 当前选中的模态。**顺序与 ASSET_KINDS 一致**（视频、图片、音频、文本），
+   * 全程只此一份顺序，不让页面自己另排。
+   *
+   * 非法值按图片兜底而不是报错：?k= 是 URL，用户手打错一个字不该看到一页错误，
+   * 落到一个能用的界面上更好。
+   */
+  const INGEST_TABS = ASSET_KINDS.map((a) => ({ kind: a.kind, label: a.label }))
+  const wantedKind = (k ?? '').trim()
+  const currentKind: AssetKind = INGEST_TABS.some((t) => t.kind === wantedKind)
+    ? (wantedKind as AssetKind)
+    : 'image'
+
   const imgN = Number(imgs) || 0
   const vidN = Number(vids) || 0
+  const audN = Number(auds) || 0
   const failN = Number(fail) || 0
-  const total = Number(count) || imgN + vidN
+  const total = Number(count) || imgN + vidN + audN
 
   return (
     <div className="mx-auto max-w-5xl">
-      <h1 className="text-2xl font-semibold">入库</h1>
+      <h1 className="text-2xl font-semibold">入库{currentKind !== 'text' ? '' : ''}</h1>
       <p className="mt-1 text-sm text-neutral-400">
-        当前入库到「{current ? current.name : '默认库'}」，切换库请在上方选择
+        当前入库到「{current ? current.name : '默认库'}」
       </p>
 
       {err && (
@@ -85,6 +107,7 @@ export default async function IngestPage({
             已入库 {total} 个文件
             {imgN > 0 && ` · 图片 ${imgN}`}
             {vidN > 0 && ` · 视频 ${vidN}`}
+            {audN > 0 && ` · 音频 ${audN}`}
             {name ? `：${name}` : ''}
           </p>
           {failN > 0 && (
@@ -112,47 +135,92 @@ export default async function IngestPage({
       )}
 
       {/*
-        **两栏，任务队列在右而不是全局导航。** 它属于入库页的上下文：真正的等待
-        发生在这一页，左边上传面板就是实时进度；右栏补的是左栏给不了的，即刷新后
-        仍在、其他标签页发起的任务。它曾挂在全局导航侧边栏，被指出层级错了——
-        一块与导航无关的内容常驻在那里，每次打开应用都看得见，而它对检索页与素材库
-        页毫无意义。
+        **三个层级，从上往下：标题 → 横排四个模态 → 单栏主区。**
 
-        窄屏（<lg）右侧栏整体隐藏，不堆到上传面板下面：等待期间人看的是左栏那一批，
-        右栏在这时只是补充，真需要时把窗口拉宽即可，它不是主路径。
+        四个模态是**这一页的分类导航**，所以横着排在标题正下方，跟「入库」这个
+        标题是一组。主区是单栏，不再分左右。
 
-        错误提示与入库汇总刻意留在这两栏之外：它们是这一批操作的结论，与「哪些任务
-        还在跑」不是一回事，塞进左栏会让人以为它属于上传面板。
+        早先这里有两版都错了。第一版把四个模态竖排塞进右侧栏，与任务队列并列，
+        用户指出层级反了：那四个选项是「这一轮要往库里放什么」，是页面自己的分类；
+        队列是「什么正在跑」，是执行状态，两者不同级。第二版按这个意见改成模态横排、
+        右栏专放队列，但右栏本身的问题还在——它与左栏上传面板显示的是同一批任务，
+        只是口径不同（左栏只认这一次选的，右栏认服务端全量），于是要靠一句「这里
+        的任务与左边那批文件是同一个来源」来解释，用户直说这部分逻辑混乱。
+
+        第三版把右栏整个去掉，它唯一独有的价值（刷新页面后任务还在）并进左栏：
+        面板挂载时从服务端把未完成的任务恢复成行。于是一处显示、刷新不丢，
+        256px 宽度还给上传区，也没有第二套口径要解释。
+
+        为什么一种模态一个界面，不再共用一个拖放框：图片是秒级，视频与音频是
+        分钟级（转写），共用一个框时无从判断手上的文件要等多久。在标着「图片」
+        的地方拖进 mp4 然后等五分钟，比一开始就分开放更让人困惑。分开之后每块
+        界面顶部那句话可以直接说清自己的等待量级。
+
+        **选中态进 URL（?k=audio）**：刷新与分享链接落在同一个模态上，且无 JS
+        时这四个选项是普通链接，照样能切。
       */}
-      <div className="mt-6 flex items-start gap-8">
-        <div className="min-w-0 flex-1">
-          <UploadPanel
-          collections={collections.map((c) => ({ id: c.id, name: c.name }))}
-          currentCollectionId={currentId}
-        />
+      <nav className="mt-6" aria-label="入库类型">
+        <ul className="flex flex-wrap gap-2">
+          {INGEST_TABS.map((tab) => {
+            const active = tab.kind === currentKind
+            return (
+              <li key={tab.kind}>
+                <Link
+                  href={`/ingest?lib=${currentId}&k=${tab.kind}`}
+                  aria-current={active ? 'page' : undefined}
+                  className={`block rounded-md px-4 py-2 text-sm transition ${
+                    active
+                      ? 'bg-neutral-100 font-medium text-neutral-900'
+                      : 'border border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-100'
+                  }`}
+                >
+                  {tab.label}
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      </nav>
 
-      {/*
-        文本入库单独一张卡。**不是塞进上面那个上传面板里**：那边是「选文件」
-        的形态（点击、拖放、多选），文本没有文件，混在一起会让两种心智模型
-        挤在同一块区域。分成两张卡，各管一种输入形态。
-        原生表单提交，跟图片视频一样不依赖 JS。
-      */}
+      <div className="mt-5">
+        {/*
+          三种有文件的模态**全部常驻挂载，用 hidden 切显示**，不是渲染当前那一个。
+
+          切模态会把面板卸载重挂，代价是待命区里选好的文件连同步略图一起消失：
+          人往图片入口拖了三十张，发现还得补一段音频，点过去再点回来，三十张要
+          重选一遍。常驻之后待命文件、本地预览地址、上传进度都留在原处。
+
+          隐藏两块同时挂着的代价是三个面板各自轮询，但轮询条件是自己有没有在
+          跑的任务（见 UploadPanel 的 hasActiveJob），没有任务的隐藏面板不发
+          请求。真正在后台跑的视频与音频任务也因此不会因为切走了页面而停止，
+          这正是想要的行为。
+
+          hidden 属性顺带把隐藏面板从 Tab 顺序里摘掉，键盘用户不会连续 Tab 到
+          三个看不见的界面里去。
+        */}
+        {FILE_KINDS.map((kind) => (
+          <div key={kind} hidden={kind !== currentKind}>
+            <UploadPanel
+              collections={collections.map((c) => ({ id: c.id, name: c.name }))}
+              currentCollectionId={currentId}
+              accept={kind}
+            />
+          </div>
+        ))}
+
+        {/*
+          文本没有文件，也就没有「待命区」这种跨模态要保住的状态，跟着模态显隐
+          即可。它单独一张卡：那边是「填标题粘正文」的形态，塞进拖放面板会让
+          两种心智模型挤在同一块区域。
+        */}
+        <div hidden={currentKind !== 'text'}>
           <TextIngestForm
             collections={collections.map((c) => ({ id: c.id, name: c.name }))}
             currentCollectionId={currentId}
           />
         </div>
-
-        <aside className="hidden w-64 flex-none lg:block">
-          {/*
-            sticky 跟着滚：任务要跑几分钟，这一页会长，队列停在视野里才对。
-            top-10 对齐主区的 py-10，不贴顶。
-          */}
-          <div className="sticky top-10">
-            <QueuePanel />
-          </div>
-        </aside>
-      </div>
     </div>
-  )
+  </div>
+)
 }
+

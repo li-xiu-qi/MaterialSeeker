@@ -42,7 +42,11 @@ export async function POST(req: Request) {
   const jobIds = createJobs(
     items.map((i) => ({
       batchId,
-      kind: (i.kind === 'image' ? 'image' : 'video') as 'image' | 'video',
+      // 前端已按扩展名判好模态（见 lib/mediaKind），这里不再猜：
+      // 拿不准的一律当视频，因为只有视频那条路会真的去看文件内容。
+      kind: (i.kind === 'image' || i.kind === 'audio'
+        ? i.kind
+        : 'video') as 'image' | 'audio' | 'video',
       title: i.name as string,
       collectionId,
     })),

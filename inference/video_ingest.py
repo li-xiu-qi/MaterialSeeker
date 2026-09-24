@@ -12,13 +12,14 @@ ContentDetector 阈值 27.0、最短场景 5 秒、单视频场景上限 50，�
 时间戳单位统一为毫秒（FunASR sentence_info 原生单位），对外只吐毫秒。
 """
 
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 import threading
-from typing import Any
+from typing import Any, Optional
 
 import logging
 
@@ -415,6 +416,14 @@ def extract_audio(video_path: str, out_wav: str) -> str | None:
 # ---------------------------------------------------------------- 编排
 
 
+class TranscribeRequest(BaseModel):
+    """/transcribe 的入参。**只要音频路径**，不要 scene/frames 那一套。"""
+
+    audio_path: str
+    hotword: str = ""
+    job_id: str | None = None
+
+
 class ProcessRequest(BaseModel):
     video_path: str
     scene_threshold: float = 27.0
@@ -464,6 +473,43 @@ def _module_version(name: str) -> str | None:
         return importlib.metadata.version(name)
     except Exception:
         return None
+
+
+@app.post("/transcribe")
+def transcribe_only(req: TranscribeRequest):
+    """音频 → 句级转写。**不抽帧、不检场景**，那是视频才有的事。
+
+    音频文件直接调 /process 会失败：/process 的第二步是 detect_scenes，它拿
+    opencv 打开文件读视频流，纯音频没有视频流，抽帧零产物。音频模态要的是
+    「抽音轨 + 转写」这一半，所以单独开一个端点，复用同一批函数
+    （extract_audio、transcribe），不另写一套 ASR 调用——两处各写一遍的结果
+    是换模型时只改一边，而错了的那边不会报错，只是转写结果为空。
+
+    -vn 让 ffmpeg 丢掉视频流，对 mp4（只有音轨要抽）与 mp3/flac/m4a（本来
+    就没有视频流）是同一个参数，不需要按扩展名分支。
+    """
+    if not os.path.isfile(req.audio_path):
+        raise HTTPException(404, f"audio not found: {req.audio_path}")
+
+    jid = req.job_id
+    _setp(jid, "prepare")
+
+    sentences: list[dict] = []
+    with tempfile.TemporaryDirectory(prefix="videoseeker-audio-") as td:
+        wav = os.path.join(td, "audio.wav")
+        audio = extract_audio(req.audio_path, wav)
+        if audio:
+            # 转写是全程最长的一段，内部拿不到细分进度（FunASR 一次 generate
+            # 跑完才返回）。报音频时长，前端据此显示「音频 X 分 X 秒，已等待 Y」。
+            _setp(jid, "transcribe", duration_ms=probe_duration_ms(audio))
+            sentences = transcribe(wav, hotword=req.hotword)
+
+    _setp(jid, "done")
+    return {
+        "audio_path": req.audio_path,
+        "sentences": sentences,
+        "sentence_count": len(sentences),
+    }
 
 
 @app.post("/process")
@@ -538,6 +584,124 @@ def process(req: ProcessRequest):
     # 反复拉一遍。
     _setp(jid, "done")
     return result
+
+
+# ---------------------------------------------------------------- 图片 AI 标注
+
+# 视觉模型的提示词。**要求返回 JSON 而不是自然语言**，因为调用方要直接落库：
+# 三段自由文本回来还得再解析一次，而解析失败的代价是这一张的标注全丢。
+#
+# temperature 压到 0.3：标注要的是稳定可复现的描述，不是文采。同一张图两次标注
+# 差太多的话，用户没法判断该信哪次。
+ANALYZE_PROMPT = (
+    "请分析这张图片，只返回 JSON，不要有任何其他文字。"
+    '格式：{"title": "简短标题，15字以内", '
+    '"description": "详细描述画面内容，80字以内，说清画面里有什么、在做什么", '
+    '"tags": ["标签1", "标签2", "标签3", "标签4", "标签5"]}。'
+    "标签要填用户之后可能用来搜这个词，比如场景、主体、颜色、情绪。"
+)
+
+
+class AnalyzeRequest(BaseModel):
+    image_path: Optional[str] = None
+    image_base64: Optional[str] = None
+
+
+@app.post("/analyze")
+def analyze(req: AnalyzeRequest):
+    """图片 -> 标题 / 描述 / 标签。**给上传后的批量标注用。**
+
+    走 glm-4.6v-flash 这类多模态对话模型，不是 embedding 模型：embedding 只能
+    告诉我们两张图像不像，说不出图像里是什么。标注要的是后者。
+
+    实现照搬 SmartImager 那一套，三处兼容都是撞过的：
+    1. 传 base64 而不是路径。推理服务与文件不一定同机，路径不可靠。
+    2. 模型可能把 JSON 包在 markdown 代码块里，要先剥掉再找首尾花括号。
+    3. thinking 模型的正文可能在 reasoning_content 里而 content 是空的，
+       两个都读，否则拿到空串还以为模型坏了。
+
+    失败不返回半成品：抛 5xx，让调用方把这一条标记成失败并继续下一张。
+    一张的失败不该让整批标注停下来。限流是例外，透出 429 而不是 5xx，理由见下面。
+    """
+    import base64 as _b64
+
+    if req.image_base64:
+        img_b64 = req.image_base64
+    elif req.image_path and os.path.isfile(req.image_path):
+        with open(req.image_path, "rb") as f:
+            img_b64 = _b64.b64encode(f.read()).decode()
+    else:
+        raise HTTPException(status_code=404, detail="图片文件不存在")
+
+    try:
+        from openai import OpenAI, RateLimitError
+
+        # max_retries=0：SDK 默认那两次重试的退避合计只有 1.5 秒左右，扛不住一次容量
+        # 窗口（2026-09-26 17:57 实测 429 连续持续 11 秒以上）。重试交给调用方按同样
+        # 的节奏做，那边能一边等一边给用户报进度，藏在这里重试是静默的，用户只会
+        # 看到进度卡住不动。
+        client = OpenAI(
+            api_key=os.environ.get("GLM_API_KEY", ""),
+            base_url=os.environ.get("OPENAI_API_BASE", "https://open.bigmodel.cn/api/paas/v4"),
+            max_retries=0,
+        )
+        if img_b64.startswith("data:"):
+            img_b64 = img_b64.split(",", 1)[1]
+
+        resp = client.chat.completions.create(
+            model=os.environ.get("VS_ANALYZE_MODEL", "glm-4.6v-flash"),
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": ANALYZE_PROMPT},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                    ],
+                }
+            ],
+            max_tokens=2000,
+            temperature=0.3,
+        )
+
+        msg = resp.choices[0].message
+        raw = msg.content or ""
+        if not raw:
+            raw = getattr(msg, "reasoning_content", "") or ""
+        if not raw:
+            # 模型确实回了但两个字段都空。这不是解析问题，是这一次调用没产出，
+            # 按失败处理，让调用方重试或跳过，不要把空标注写进库。
+            raise HTTPException(status_code=502, detail="模型未返回内容")
+
+        raw_clean = re.sub(r"```json\s*|```\s*", "", raw)
+        start = raw_clean.find("{")
+        end = raw_clean.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                result = json.loads(raw_clean[start:end])
+                tags = result.get("tags") or []
+                if not isinstance(tags, list):
+                    tags = []
+                return {
+                    "title": str(result.get("title") or "")[:120],
+                    "description": str(result.get("description") or "")[:500],
+                    "tags": [str(t)[:20] for t in tags if str(t).strip()][:12],
+                }
+            except json.JSONDecodeError:
+                pass
+        # JSON 都没找着：把原文当前 200 字当描述返回，至少不白跑一次。
+        # 调用方会照常入库，用户看到一段能读的文字，比一条空标注好。
+        return {"title": "", "description": raw[:200], "tags": []}
+    except HTTPException:
+        raise
+    except RateLimitError as e:
+        # 限流必须原样透出 429，不能压成 500：调用方靠状态码区分「模型忙，等等再来」
+        # 和「这一张真的坏了」。压成 500 的后果是批量标注从第 9 张起全部永久失败，
+        # 用户看到一片红色，而真正要做的只是等十几秒。
+        log.warning(f"标注被限流: {e}")
+        raise HTTPException(status_code=429, detail=str(e))
+    except Exception as e:
+        log.error(f"图片标注失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import {
   type JobRow,
 } from './jobs'
 import { ingestVideo, type IngestStage, type StageSub } from './ingestVideo'
+import { ingestAudio, type AudioIngestStage, type AudioStageSub } from './ingestAudio'
 import { ingestImage } from './ingest'
 
 /**
@@ -49,6 +50,45 @@ const STAGE_ORDER: IngestStage[] = [
   'frame-encode',
   'done',
 ]
+
+/**
+ * 音频的阶段序。**不与视频共用 STAGE_ORDER。**
+ *
+ * 音频没有 scenes/frames/frame-encode 三步，共用的话 transcribe 在视频那条序里
+ * 排第 6，音频从 prepare（5%）直接跳到 transcribe（62%），中间的检查与抽音轨
+ * 被显示成「已完成一大半」，而那时音频还没开始转。音频这条序里 transcribe 是
+ * 第二步，占比给足——它是音频入库全程最长的一段。
+ */
+const AUDIO_STAGE_ORDER: AudioIngestStage[] = [
+  'queued',
+  'prepare',
+  'transcribe',
+  'text-encode',
+  'db',
+  'done',
+]
+
+/** 音频的阶段权重。与视频同一套 stage 表的 label，权重另给。 */
+const AUDIO_STAGE_AT: Record<AudioIngestStage, number> = {
+  queued: 0,
+  prepare: 5,
+  transcribe: 70,
+  'text-encode': 90,
+  db: 96,
+  done: 100,
+}
+
+export function audioStageToPercent(s: AudioIngestStage, sub?: AudioStageSub): number {
+  const idx = AUDIO_STAGE_ORDER.indexOf(s)
+  if (idx < 0) return 0
+  const base = AUDIO_STAGE_AT[s]
+  const next = AUDIO_STAGE_ORDER[idx + 1]
+  if (!next || s === 'done') return base
+  const span = AUDIO_STAGE_AT[next] - base
+  // 转写阶段没有 done/total 可插值（FunASR 一次 generate 跑完才返回），
+  // 所以给 0  fractional，进度条停在 transcribe 起点直到它真的结束。
+  return Math.round(base)
+}
 
 /**
  * 把阶段与细分数折算成百分比。
@@ -152,6 +192,16 @@ async function runOne(job: JobRow): Promise<void> {
     updateJob(job.id, { stage: s, percent: pct, message: detail })
   }
 
+  // 音频的阶段回调与百分比各一套，理由见 AUDIO_STAGE_ORDER 上方。
+  const onAudioStage = (s: AudioIngestStage, sub?: AudioStageSub) => {
+    const pct = audioStageToPercent(s, sub)
+    const detail =
+      s === 'transcribe' && sub?.durationMs
+        ? `语音转文字（音频 ${fmtMs(sub.durationMs)}）`
+        : stageLabel(s)
+    updateJob(job.id, { stage: s, percent: pct, message: detail })
+  }
+
   try {
     if (job.kind === 'video') {
       const result = await ingestVideo({
@@ -165,6 +215,23 @@ async function runOne(job: JobRow): Promise<void> {
         stage: 'done',
         percent: 100,
         message: `${result.frameCount} 帧 · ${result.sentenceCount} 句 · ${result.chunkCount} 块`,
+        resultJson: JSON.stringify(result),
+        finished: true,
+      })
+    } else if (job.kind === 'audio') {
+      const result = await ingestAudio({
+        audioPath: job.file_path ?? '',
+        title: job.title,
+        collectionId: job.collection_id,
+        onStage: onAudioStage,
+      })
+      updateJob(job.id, {
+        status: 'done',
+        stage: 'done',
+        percent: 100,
+        // 音频没有帧，说「帧」会让人以为漏了东西。报句数与块数就够判断
+        // 「这段音频是真转写出东西了，还是空跑一遍」。
+        message: `${result.sentenceCount} 句 · ${result.chunkCount} 块`,
         resultJson: JSON.stringify(result),
         finished: true,
       })
@@ -204,7 +271,7 @@ function fmtMs(ms: number): string {
 export function submitJobs(
   jobs: Array<{
     batchId: string
-    kind: 'video' | 'image'
+    kind: 'video' | 'image' | 'audio'
     title: string
     filePath?: string
     collectionId: number
