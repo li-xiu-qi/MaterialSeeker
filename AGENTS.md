@@ -1,5 +1,7 @@
 # VideoSeeker 开发须知
 
+跨仓拓扑、运行目标机（dgx-spark）、部署与同步纪律以套件根 `../AGENTS.md` 为权威，本文件只写本仓开发细节。
+
 设计文档在平级仓 `VideoSeeker-product-design/`（私有），产品需求、交互设计、已定决策都在那里，动手前先读 `01_PRD/产品需求文档.md`。
 
 ## 本地校验
@@ -12,37 +14,37 @@ npm run typecheck   # tsc --noEmit
 
 ## 服务拓扑（dgx-spark）
 
-| 端口 | 进程 | 环境 | 职责 |
+推理侧已拆为独立仓 `../VideoSeeker-inference/`，部署路径 `~/videoseeker-inference`，
+用它的 `bash start.sh` 起停两个推理服务。
+
+| 端口 | 进程 | 环境 / 位置 | 职责 |
 |---|---|---|---|
-| 9280 | next dev | node_modules | 前端 + API |
-| 8280 | inference/server.py | xinfer-env | 多模态 embedding 编码 |
-| 8281 | inference/video_ingest.py | hearsight-env | 抽音轨、ASR、场景检测、抽帧 |
+| 9280 | next dev | 本仓 node_modules | 前端 + API |
+| 8280 | embedding_server.py | eg2-env，推理仓 | EmbeddingGemma 2 全模态 embedding 编码（768 维） |
+| 8281 | video_server.py | ~/hearsight-env，推理仓 | 抽音轨、ASR、场景检测、抽帧 |
 
-两个 Python 服务分环境是因为 embedding 用 xinfer-env（torch 2.14），视频处理用 hearsight-env（funasr）。别试图合成一个环境。
+两个 Python 服务分环境：embedding 用 eg2-env（模型卡硬性要求 st>=6.1 + tf>=5.19 + torch 2.14），视频处理用 hearsight-env（funasr）。别试图合成一个环境。
 
-启动：
+启动（推理服务部分见推理仓 README 与 start.sh）：
 
 ```bash
-~/xinfer-env/bin/python inference/server.py --port 8280
-~/hearsight-env/bin/python inference/video_ingest.py --port 8281
-./node_modules/.bin/next dev --port 9280
+cd ~/videoseeker-inference && bash start.sh   # 8280 + 8281
+cd ~/videoseeker && ./node_modules/.bin/next dev --port 9280
 ```
 
 重启时三个坑：按进程名批量匹配（模式串里出现 `next`、`python` 这类字样）会把 ssh 自身的命令行一并匹配上，命令自杀返回 255，且端口可能已释放、服务没起；要拿 PID 就从端口反查（`ss -ltnp | grep ':9280' | grep -oP 'pid=\K[0-9]+'），这条命令自身不含进程名，不会自匹配；脱离会话的环境下 npx 解析不到本地 node_modules，会临时下载并跑错目录，改用 node_modules 内的 next 二进制绝对路径；8281 用 `~/hearsight-env`，8280 用 `~/xinfer-env`，别混。
 
-## 视频素材的三个坑（都实测过）
+## 视频素材相关的坑
 
-opencv-python-headless 不带 AV1 解码器。B 站高画质档默认下发 AV1，`cv2.VideoCapture` 直接失败，抽帧零产物，日志特征是 `Failed to get pixel format`。不要写成「B 站需要转码」这种按来源判断的规则，触发条件是「试读一帧失败就跑 ffmpeg 转 H.264 副本」，这样以后遇到 WebM、HEVC 等未知编码也一并覆盖。副本交给 `detect_scenes` 时传 `already_checked`，否则同一文件会被转码两遍。
+视频素材链路的坑（AV1 转码触发条件、yt-dlp 的 ffmpeg-location 必须指向二进制文件、ffprobe 双流校验、抽帧服务 logging 配置）全部发生在推理侧，实测记录在推理仓 `../VideoSeeker-inference/AGENTS.md`，本仓不重复。
 
-yt-dlp 的 `--ffmpeg-location` 必须指向二进制文件，指向目录不生效，它会照旧报 ffmpeg not installed 然后跳过合并音视频。后果极具误导性：下载显示成功、文件在位、大小正常，只有下游发现转写零句。凡是下载来的素材，入库前必须用 ffprobe 确认「有视频流且有音频流」，不能凭退出码判断链路健康。
-
-抽帧服务（inference/video_ingest.py）没有 logging 配置，新函数里直接引用 `log` 会 NameError，表现为接口 500 而不是启动失败。logger 已 `logging.getLogger` 配好，日志落 `/tmp/vs-video.log`。
+入库调用方要知道的边界：触发条件不是「B 站来的要转码」而是「试读一帧失败就跑 ffmpeg 转 H.264 副本」，副本交给 detect_scenes 时走 already_checked 分支（推理仓处理）；下载来的素材入库前必须有 ffprobe 双流确认这一步（推理仓的 video_server 已带，调用方传 ffmpeg 环境即可）。
 
 ## 几条硬约束
 
-向量维度固定 1024，改维度要同时改 `db.ts` 的 `VECTOR_DIM`、`embed.ts` 的校验、推理服务的 `VIDEOSEEKER_DIM` 三处。改一处不改另两处的结果是请求在边界上才炸。
+向量维度固定 1024，改维度要同时改 `db.ts` 的 `VECTOR_DIM`、`embed.ts` 的校验、推理仓（`../VideoSeeker-inference/.env`）的 `VIDEOSEEKER_DIM` 三处。改一处不改另两处的结果是请求在边界上才炸。
 
-instruction 不能省。索引端与查询端必须分别带 passage 与 query 指令，`embed.ts` 里两个常量集中管理，不要在各处散着写字符串。
+instruction 不能省。索引端与查询端必须分别带 passage 与 query 指令，`embed.ts` 里两个常量集中管理，不要在各处散着写字符串。这两个常量与推理仓服务端的缺省值必须一致。
 
 FTS5 用 external content 模式，靠触发器与主表同步。
 

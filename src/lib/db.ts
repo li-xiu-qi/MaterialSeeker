@@ -2,10 +2,11 @@ import Database from 'better-sqlite3'
 import { PATHS } from './paths'
 
 /**
- * SQLite 单例。向量维度固定 1024（编码器 2048 维经 MRL 截断），
- * 截断损失实测约 0.1 个 R@10 点，存储减半。
+ * SQLite 单例。向量维度固定 768（EmbeddingGemma 2 原生维度）。
+ * 改维度必须三处同步：推理仓 .env 的 VIDEOSEEKER_DIM、本文件、embed.ts 的
+ * 校验；换模型则库里所有已存向量作废，必须全量重算。
  */
-export const VECTOR_DIM = 1024
+export const VECTOR_DIM = 768
 
 let db: Database.Database | null = null
 

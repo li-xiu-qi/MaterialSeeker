@@ -10,11 +10,10 @@ import { VECTOR_DIM } from '../lib/db'
 
 const BASE_URL = process.env.VIDEOSEEKER_INFERENCE_URL || 'http://127.0.0.1:8280'
 
-/** 索引侧（passage）：被检索的内容 */
-export const PASSAGE_INSTRUCTION = 'Represent this text for retrieval.'
-/** 查询侧（query）：用户的查询 */
-export const QUERY_INSTRUCTION =
-  'Given a search query, retrieve relevant passages that answer the query.'
+/** 索引侧（passage）：被检索的内容。EG2 的 Document task prefix。 */
+export const PASSAGE_INSTRUCTION = 'title: none | text: '
+/** 查询侧（query）：用户的查询。EG2 的 SearchQuery task prefix。 */
+export const QUERY_INSTRUCTION = 'task: search result | query: '
 
 export type Modality = 'text' | 'image'
 
