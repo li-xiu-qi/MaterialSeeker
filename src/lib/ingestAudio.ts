@@ -4,6 +4,7 @@ import { PATHS } from './paths'
 import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
 import { chunkGreedy, type Sentence } from './chunking'
 import { clearServiceProgress, pollServiceProgress } from './serviceProgress'
+import { asrEngineLabel } from './asrEngine'
 
 /**
  * 音频入库编排。**视频入库去掉「帧」那一半**，其余完全同构：
@@ -91,6 +92,8 @@ export async function ingestAudio(opts: AudioIngestOptions): Promise<AudioIngest
     }
     const data = (await res.json()) as {
       sentences: Array<{ sentence: string; start_ms: number; end_ms: number }>
+      // 实际生效的 ASR 路径，云端回退本地时报 local（旧版本无此字段）
+      asr_provider?: string
     }
 
     const sentences: Sentence[] = data.sentences.map((s) => ({
@@ -128,7 +131,7 @@ export async function ingestAudio(opts: AudioIngestOptions): Promise<AudioIngest
 
     const tr = db
       .prepare('INSERT INTO transcripts (asset_id, full_text, language, asr_engine) VALUES (?, ?, ?, ?)')
-      .run(assetId, fullText, 'zh', 'funasr-paraformer-zh')
+      .run(assetId, fullText, 'zh', asrEngineLabel(data.asr_provider))
     const transcriptId = Number(tr.lastInsertRowid)
 
     // --- 3. 分块 + 编码 ---

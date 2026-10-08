@@ -35,6 +35,7 @@ const stage: Record<IngestStage, { label: string; at: number }> = {
   'text-encode': { label: '文字向量化', at: 85 },
   db: { label: '写入库', at: 92 },
   'frame-encode': { label: '画面向量化', at: 95 },
+  'frame-caption': { label: '生成画面描述', at: 97 },
   done: { label: '完成', at: 100 },
 }
 
@@ -48,6 +49,7 @@ const STAGE_ORDER: IngestStage[] = [
   'text-encode',
   'db',
   'frame-encode',
+  'frame-caption',
   'done',
 ]
 
@@ -186,7 +188,7 @@ async function runOne(job: JobRow): Promise<void> {
     const detail =
       s === 'transcribe' && sub?.durationMs
         ? `语音转文字（音频 ${fmtMs(sub.durationMs)}）`
-        : s === 'frames' || s === 'frame-encode'
+        : s === 'frames' || s === 'frame-encode' || s === 'frame-caption'
           ? `${stageLabel(s)} ${sub?.done ?? 0}/${sub?.total ?? 0}`
           : stageLabel(s)
     updateJob(job.id, { stage: s, percent: pct, message: detail })

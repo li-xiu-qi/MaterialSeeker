@@ -5,6 +5,10 @@ import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
 import { chunkByScene, chunkFixed, chunkGreedy, type Sentence } from './chunking'
 import { clearServiceProgress, pollServiceProgress } from './serviceProgress'
 import { generateThumbs } from './thumbs'
+import { analyzeImage } from './analyze'
+import { composeCaptionText } from './tags'
+import { asrEngineLabel } from './asrEngine'
+
 
 /**
  * 视频入库编排。四个步骤，每步的失败都单独可观测：
@@ -12,10 +16,12 @@ import { generateThumbs } from './thumbs'
  * 1. 调视频处理服务（8281）拿场景边界、帧文件、句级转写
  * 2. 起 transcript + sentences，句级毫秒时间戳直接落库
  * 3. 按策略分块并编码（默认场景对齐，与帧的上下文一致）
- * 4. 帧编码入库（图片向量一路；帧描述文本留待 VLM 接入）
+ * 4. 帧编码入库（图片向量一路）
+ * 5. 帧描述：视觉模型生成 caption 并编码（v0.11 接入，与图片标注同一条路）
  *
- * 帧描述为空时 frames.caption_embedding 是 NULL，检索路 2 不出力，
- * 这是当前已知的能力缺口，不是 bug。
+ * 第 5 步可用 MATERIALSEEKER_FRAME_CAPTION=0 关掉。关掉后 frames.caption 为空、
+ * caption_embedding 为 NULL，检索的描述文本路在视频侧不出力，这是设计允许的
+ * 降级，不是故障。
  *
  * **进度**：整个流程由 ingestRunner 在后台跑，本模块通过 onStage 把阶段报出去。
  * 阶段分两路：视频处理服务那边（prepare/scenes/frames/audio/transcribe）由
@@ -35,6 +41,7 @@ export type IngestStage =
   | 'text-encode'
   | 'db'
   | 'frame-encode'
+  | 'frame-caption'
   | 'done'
 
 export interface StageSub {
@@ -67,10 +74,23 @@ export interface VideoIngestResult {
   sentenceCount: number
   frameCount: number
   strategy: string
+  /** 帧描述：实际拿到文本并编码的帧数（开关关闭或整段熔断时为 0） */
+  captionCount: number
+  /** 帧描述：失败的帧数。连续失败触发的熔断不在这里逐帧累计 */
+  captionFailedCount: number
 }
 
 /** 帧编码一批发多少张。图片编码一次前向只能发一类，批太小则往返次数多。 */
 const FRAME_ENCODE_BATCH = 8
+
+/**
+ * 帧描述连续失败多少帧就放弃剩余。
+ *
+ * analyzeImage 对 429 自带五次退避，耗尽一轮约 260 秒。模型侧持续限流时逐帧
+ * 重试会把一个 50 帧的视频拖到一个多小时，而帧向量那路不受影响、检索不塌。
+ * 所以见连续失败就整段收手，剩余帧的 caption 留空（降级路径，见文件头）。
+ */
+const FRAME_CAPTION_FAIL_STREAK = 3
 
 export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngestResult> {
   const db = getDb()
@@ -119,6 +139,9 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
       scenes: Array<{ start_ms: number; end_ms: number }>
       frames: Array<{ scene_index: number; timestamp_ms: number; path: string }>
       sentences: Array<{ sentence: string; start_ms: number; end_ms: number; spk_id: string | null }>
+      // 推理仓回报实际生效的 ASR 路径（云端失败回退本地时报 local）。
+      // 旧版本不返回该字段，用 ?? 兜住，别让一次接口升级把入库整个打断。
+      asr_provider?: string
     }
 
     const sentences: Sentence[] = data.sentences.map((s) => ({
@@ -150,7 +173,7 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
       .prepare(
         'INSERT INTO transcripts (asset_id, full_text, language, asr_engine) VALUES (?, ?, ?, ?)',
       )
-      .run(assetId, sentences.map((s) => s.text).join(' '), 'zh', 'funasr-paraformer-zh')
+      .run(assetId, sentences.map((s) => s.text).join(' '), 'zh', asrEngineLabel(data.asr_provider))
     const transcriptId = Number(tr.lastInsertRowid)
 
     // --- 3. 分块 + 编码 ---
@@ -247,6 +270,68 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
       txF()
     }
 
+    // --- 5. 帧描述（视觉模型）---
+    // 复用图片标注那条路（analyze.ts 的 analyzeImage，自带 429 五次退避与超时），
+    // 不在视频侧另写一遍调用。frames 表只有一个文本字段，视觉模型返回的
+    // title/description/tags 三段在这里合成单段文本存进去，语义与图片标注一致。
+    //
+    // 关掉开关的场景是成本敏感：这段每帧一次视觉模型调用，50 帧的视频一个视频
+    // 走完是分钟级与分角级花费。关掉只丢这一路，帧向量与转写两路不受影响。
+    let captionDone = 0
+    let captionFailed = 0
+    if (data.frames.length > 0 && process.env.MATERIALSEEKER_FRAME_CAPTION !== '0') {
+      stage('frame-caption', { done: 0, total: data.frames.length })
+      const captions: Array<string | null> = new Array(data.frames.length).fill(null)
+      let failStreak = 0
+      for (let i = 0; i < data.frames.length; i++) {
+        try {
+          const a = await analyzeImage(data.frames[i].path)
+          // description 优先；模型偶发只回 title/tags 时退到二者拼的文本，
+          // 空帧（黑帧转场之类）允许整条为空。
+          captions[i] = a.description?.trim() || composeCaptionText(a.title, a.tags) || null
+          failStreak = 0
+          const text = captions[i]
+          if (text) captionDone++
+        } catch {
+          captionFailed++
+          failStreak++
+          stage('frame-caption', { done: i + 1, total: data.frames.length })
+          if (failStreak >= FRAME_CAPTION_FAIL_STREAK) break
+        }
+        stage('frame-caption', { done: i + 1, total: data.frames.length })
+      }
+
+      // caption 文本统一走 EG2 编码，与图片 caption_embedding 同一张图。
+      // 用 PASSAGE 指令：这些是入库侧的内容，不是查询。
+      const okIdx: number[] = []
+      captions.forEach((c, i) => {
+        if (c) okIdx.push(i)
+      })
+      if (okIdx.length > 0) {
+        const vecs = await encodeBatch({
+          inputs: okIdx.map((i) => ({
+            modality: 'text' as const,
+            text: captions[i] as string,
+            instruction: PASSAGE_INSTRUCTION,
+          })),
+        })
+        const updateCaption = db.prepare(
+          'UPDATE frames SET caption = ?, caption_embedding = ? WHERE asset_id = ? AND scene_index = ?',
+        )
+        const txC = db.transaction(() => {
+          okIdx.forEach((fi, j) => {
+            updateCaption.run(
+              captions[fi],
+              vecs[j] ? embeddingToBlob(vecs[j]) : null,
+              assetId,
+              data.frames[fi].scene_index,
+            )
+          })
+        })
+        txC()
+      }
+    }
+
     stage('done', { done: 1, total: 1 })
 
     // 帧缩略图也预热掉。帧是视频卡片封面的来源，一屏几张视频就是几个未命中的
@@ -261,6 +346,8 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
       sentenceCount: sentences.length,
       frameCount,
       strategy,
+      captionCount: captionDone,
+      captionFailedCount: captionFailed,
     }
   } finally {
     // 无论成败都停轮询并清掉服务端进度条目：失败路径同样会留下 done 条目，

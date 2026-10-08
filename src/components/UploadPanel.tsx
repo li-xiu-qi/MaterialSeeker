@@ -158,6 +158,7 @@ const STAGE_LABEL: Record<string, string> = {
   'text-encode': '文字向量化',
   db: '写入库',
   'frame-encode': '画面向量化',
+  'frame-caption': '生成画面描述',
 }
 
 /**
