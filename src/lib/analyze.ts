@@ -20,7 +20,7 @@ import { parseTags, serializeTags, composeCaptionText } from './tags'
  * 「检索模型不行」，所以两条路（单个与批量）都必须走这一个函数。
  */
 
-const VIDEO_SERVICE = process.env.VIDEOSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
+const VIDEO_SERVICE = process.env.MATERIALSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
 
 export interface AnalyzeResult {
   title: string

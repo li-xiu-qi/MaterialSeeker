@@ -11,3 +11,4 @@ npm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 app_datas/
+.tmp-test/

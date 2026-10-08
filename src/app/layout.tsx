@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'VideoSeeker',
+  title: '素材搜索 MaterialSeeker',
   description: '多模态内容检索工作台',
 }
 

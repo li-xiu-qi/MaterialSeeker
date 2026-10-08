@@ -23,7 +23,7 @@ import { generateThumbs } from './thumbs'
  * 同一个 job 行上，前端只认 job 行，不关心进度是哪儿来的。
  */
 
-const VIDEO_SERVICE = process.env.VIDEOSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
+const VIDEO_SERVICE = process.env.MATERIALSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
 
 export type IngestStage =
   | 'queued'

@@ -15,6 +15,7 @@
 
 import { getDb, cosineSim, blobToEmbedding, embeddingToBlob, VECTOR_DIM } from './db'
 import { encodeText } from './embed'
+import { segForQuery, toFtsMatch } from './segment'
 import { DEFAULT_COLLECTION_ID, scopeClause, scopeArgs } from './collections'
 import type { AssetKind } from './db'
 
@@ -273,17 +274,13 @@ export async function search(
   }
 
   // --- 关键词路（FTS5），与向量路并行存在 ---
-  // 已知失效：FTS5 默认 unicode61 tokenizer 不给中文分词，连续中文被当成单个
-  // 超长 token，中文查询恒零命中。英文与数字 token 正常（实测 Paraformer、
-  // ANN 各命中 1 条）。中文关键词检索需要建索引侧接分词（jieba 一类的
-  // 候选），未落地前这条路对中文等于不存在，见 PRD 开放问题 6。
-  // 不要把「四路合并」当成四路都有效，现在是三路有效。
+  // 中文经索引侧分词（src/lib/segment.ts，触发器在写入时切分）后可用：查询侧
+  // 过同一把刀，连续中文整句查询也能命中。英文与数字 token 行为不变。
+  // 停用词查询（tokens 为空）不查：空串 MATCH 会抛错，而「只打了语气词」
+  // 不是错误，是不该查。
   if (modality === 'all' || modality === 'video' || modality === 'audio') {
-    let ftsQuery = query
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((w) => `"${w.replace(/"/g, '""')}"`)
-      .join(' OR ')
+    const tokens = segForQuery(query)
+    const ftsQuery = tokens.length ? toFtsMatch(tokens) : ''
     if (ftsQuery) {
       const rows = db
         .prepare(

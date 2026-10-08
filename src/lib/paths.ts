@@ -3,10 +3,10 @@ import fs from 'node:fs'
 
 /**
  * 存储布局。全库唯一数据根，默认 <repo>/app_datas，
- * 可用 VIDEOSEEKER_DATA_DIR 覆盖（dgx-spark 上指向 ~/videoseeker-data）。
+ * 可用 MATERIALSEEKER_DATA_DIR 覆盖（dgx-spark 上指向 ~/materialseeker-data）。
  */
-const repoRoot = process.env.VIDEOSEEKER_REPO_ROOT || path.resolve(process.cwd(), '..')
-const dataDir = process.env.VIDEOSEEKER_DATA_DIR || path.join(repoRoot, 'app_datas')
+const repoRoot = process.env.MATERIALSEEKER_REPO_ROOT || path.resolve(process.cwd(), '..')
+const dataDir = process.env.MATERIALSEEKER_DATA_DIR || path.join(repoRoot, 'app_datas')
 
 export const PATHS = {
   repoRoot,
@@ -24,7 +24,7 @@ export const PATHS = {
   /** 中间产物（ffmpeg 拆出的音频、临时文件） */
   tmpDir: path.join(dataDir, 'tmp'),
   /** SQLite 主库 */
-  dbPath: path.join(dataDir, 'videoseeker.db'),
+  dbPath: path.join(dataDir, 'materialseeker.db'),
 } as const
 
 for (const dir of [

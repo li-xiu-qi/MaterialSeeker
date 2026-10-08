@@ -24,7 +24,7 @@ import { clearServiceProgress, pollServiceProgress } from './serviceProgress'
  * 要改两处」，而音频与视频的分块策略本来就该收敛在同一份代码里。
  */
 
-const VIDEO_SERVICE = process.env.VIDEOSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
+const VIDEO_SERVICE = process.env.MATERIALSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
 
 export type AudioIngestStage =
   | 'queued'

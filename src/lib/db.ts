@@ -1,9 +1,10 @@
 import Database from 'better-sqlite3'
 import { PATHS } from './paths'
+import { ensureSegFunction } from './segment'
 
 /**
  * SQLite 单例。向量维度固定 768（EmbeddingGemma 2 原生维度）。
- * 改维度必须三处同步：推理仓 .env 的 VIDEOSEEKER_DIM、本文件、embed.ts 的
+ * 改维度必须三处同步：推理仓 .env 的 MATERIALSEEKER_DIM、本文件、embed.ts 的
  * 校验；换模型则库里所有已存向量作废，必须全量重算。
  */
 export const VECTOR_DIM = 768
@@ -16,10 +17,12 @@ export function getDb(): Database.Database {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 5000')
+  ensureSegFunction(db) // FTS 触发器调用它，必须先于任何 INSERT 就位
   initSchema(db)
   migrateCollections(db)
   migrateKinds(db)
   initAudioFiles(db)
+  migrateFtsSegmentation(db)
   return db
 }
 
@@ -303,16 +306,67 @@ function initSchema(d: Database.Database) {
   // FTS5 与主表同步（external content 模式需手动维护）
   d.exec(`
     CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
-      INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+      INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
     END;
     CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
       INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
     END;
     CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
       INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
-      INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+      INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
     END;
   `)
+}
+
+/**
+ * 把 chunks 三个触发器换成 seg_zh 版本，并重建已有 FTS 索引。
+ *
+ * **CREATE TRIGGER IF NOT EXISTS 对已存在的旧触发器无效**：名字相同就跳过，
+ * 所以旧库（触发器里还是裸 new.text）不会因为改了上面的 DDL 而更新。判据取
+ * sqlite_master 里 chunks_ai 的定义含不含 seg_zh，不含才是旧版。
+ *
+ * **重建不走 FTS5 的 'rebuild' 命令**：external content 的 rebuild 从 content
+ * 表重新取原列写进索引，取的是原文不是 seg_zh(text)，重建完索引里仍旧是未分词
+ * 文本，中文依旧查不到。必须手工 DELETE 再按 seg_zh(text) 重插。
+ *
+ * 幂等：第二次启动时判据已满足，整个函数空跑。
+ */
+export function migrateFtsSegmentation(d: Database.Database) {
+  const row = d
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'chunks_ai'")
+    .get() as { sql: string | null } | undefined
+  if (!row?.sql || row.sql.includes('seg_zh')) return
+
+  const before = d.prepare('SELECT COUNT(*) AS n FROM chunks_fts').get() as { n: number }
+  d.exec(`
+    DROP TRIGGER IF EXISTS chunks_ai;
+    DROP TRIGGER IF EXISTS chunks_ad;
+    DROP TRIGGER IF EXISTS chunks_au;
+    CREATE TRIGGER chunks_ai AFTER INSERT ON chunks BEGIN
+      INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
+    END;
+    CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
+      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    END;
+    CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
+      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
+    END;
+  `)
+  // 手工重建索引。包一个事务：中途失败的话至少不会留下半份索引
+  // （半份索引比空索引更难查，空索引只是全查不到，半份是有的查得到有的查不到）。
+  d.transaction(() => {
+    d.exec('DELETE FROM chunks_fts')
+    d.exec('INSERT INTO chunks_fts(rowid, text) SELECT id, seg_zh(text) FROM chunks')
+  })()
+  const after = d.prepare('SELECT COUNT(*) AS n FROM chunks_fts').get() as { n: number }
+  if (before.n !== after.n) {
+    // 行数不变是预期（每条 chunk 一行，变的只是内容）；不一致说明 external
+    // content 的 rowid 映射出过问题，此时不静默，打到日志里。
+    console.warn(
+      `[fts] 重建后行数变化: ${before.n} -> ${after.n}，检查 chunks 与 chunks_fts 的 rowid 映射`,
+    )
+  }
 }
 
 /**

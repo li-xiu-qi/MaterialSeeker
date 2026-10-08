@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { BrandMark } from './BrandMark'
 
 /**
  * 应用外壳：左侧常驻导航 + 右侧主区。
@@ -53,9 +54,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         队列面板底部有「去入库页看详情」链接，入库页能看全部任务。
       */}
       <aside className="fixed inset-y-0 left-0 flex w-60 flex-none flex-col border-r border-neutral-800 bg-neutral-950 px-4 py-6">
-        <div className="px-2">
-          <p className="text-base font-semibold text-neutral-100">VideoSeeker</p>
-          <p className="mt-0.5 text-[11px] text-neutral-600">多模态内容搜索工作台</p>
+        <div className="flex items-center gap-2.5 px-2">
+          <BrandMark size={28} />
+          <div className="min-w-0">
+            <p className="truncate text-base font-semibold text-neutral-100">素材搜索</p>
+            <p className="mt-0.5 truncate text-[11px] text-neutral-600">多模态内容搜索工作台</p>
+          </div>
         </div>
 
         <nav className="mt-6 space-y-1">

@@ -6,7 +6,7 @@
  * 编排函数不必摊开 fetch 细节。
  */
 
-const VIDEO_SERVICE = process.env.VIDEOSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
+const VIDEO_SERVICE = process.env.MATERIALSEEKER_VIDEO_URL || 'http://127.0.0.1:8281'
 
 export interface ServiceProgress {
   stage: string

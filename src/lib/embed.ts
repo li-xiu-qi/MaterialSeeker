@@ -8,7 +8,7 @@ import { VECTOR_DIM } from '../lib/db'
  * 必须带不同 instruction，混用会掉点。两个常量集中在这里，改口径只改一处。
  */
 
-const BASE_URL = process.env.VIDEOSEEKER_INFERENCE_URL || 'http://127.0.0.1:8280'
+const BASE_URL = process.env.MATERIALSEEKER_INFERENCE_URL || 'http://127.0.0.1:8280'
 
 /** 索引侧（passage）：被检索的内容。EG2 的 Document task prefix。 */
 export const PASSAGE_INSTRUCTION = 'title: none | text: '

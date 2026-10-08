@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!--
+    MaterialSeeker 品牌标记：放大镜 + 山（图片的极简符号）。
+    语义=在素材（图片/视频帧/文本）里检索。深色圆角方底让它在浏览器的
+    浅色与深色标签页上都可辨；强调色用 Tailwind amber-400（#fbbf24），
+    不引入色板外的 hex。图形 16px 可辨：轮廓主导，山是实心单峰。
+  -->
+  <rect width="24" height="24" rx="6" fill="#171717" />
+  <circle cx="10.5" cy="10.5" r="5" fill="none" stroke="#f5f5f5" stroke-width="2" />
+  <path d="M8 13 L10 9.8 L11.8 12 L12.9 10.4 L14.8 13 Z" fill="#f5f5f5" />
+  <line x1="14.4" y1="14.4" x2="18.5" y2="18.5" stroke="#fbbf24" stroke-width="2.6" stroke-linecap="round" />
+</svg>
