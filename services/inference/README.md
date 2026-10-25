@@ -1,6 +1,6 @@
-# MaterialSeeker-inference
+# MaterialSeeker 推理服务
 
-MaterialSeeker 的推理与媒体处理层。业务仓只通过 HTTP 调用，不 import 本仓代码，也不共享数据库。
+本目录是 MaterialSeeker monorepo 的推理与媒体处理服务。Web 应用只通过 HTTP 调用，不 import 本目录代码，也不共享数据库。
 
 ## 两种部署档位
 
@@ -24,6 +24,22 @@ bash start.sh
 ```
 
 轻量启动脚本会停止旧的 8280，只启动 8281。`requirements-light.txt` 只包含 HTTP、云端 provider、场景检测和抽帧依赖，不包含 torch、FunASR、sentence-transformers 或模型权重。
+
+### Windows PowerShell
+
+在 `services/inference` 目录执行，环境变量直接写在当前 PowerShell 进程里：
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements-light.txt
+$env:MATERIALSEEKER_PROFILE = "light"
+$env:ASR_PROVIDER = "siliconflow"
+$env:ASR_CLOUD_KEY = "your-asr-key"
+$env:GLM_API_KEY = "your-glm-key"
+$env:FFMPEG_BIN = "C:/path/to/ffmpeg.exe"
+.venv\Scripts\python.exe video_server.py --port 8281
+```
 
 轻量模式下：
 

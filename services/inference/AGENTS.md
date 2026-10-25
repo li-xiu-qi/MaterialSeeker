@@ -1,10 +1,10 @@
-# MaterialSeeker-inference 开发须知
+# MaterialSeeker 推理服务开发须知
 
-跨仓拓扑、运行目标机（dgx-spark）、部署与同步纪律以套件根 `../AGENTS.md` 为权威，本文件只写本仓开发细节。
+monorepo 结构与部署纪律以仓库根 `AGENTS.md` 为权威，本文件只写推理服务细节。
 
-本仓是推理层，与业务仓（MaterialSeeker Next.js）的关系是 HTTP 客户端/服务端。
-改接口先看业务侧调用方：`MaterialSeeker/src/lib/embed.ts`（embedding）与
-`MaterialSeeker/src/lib/ingestVideo.ts` / `ingestAudio.ts`（视频处理）。
+本目录是推理层，与 `apps/web` 的 Next.js 应用通过 HTTP 通信。
+改接口先看业务侧调用方：`apps/web/src/lib/embed.ts`（embedding）与
+`apps/web/src/lib/ingestVideo.ts` / `ingestAudio.ts`（视频处理）。
 
 ## 本仓的核心架构：provider 层
 
@@ -48,8 +48,8 @@ requirements-video.txt      标准版 8281 的媒体处理与 FunASR
 
 ## 同步红线
 
-**向量维度改一处必炸。** 目标维度有三处：业务仓 `db.ts` 的 `VECTOR_DIM`
-（当前 768）、业务仓 `embed.ts` 的校验、本仓 `.env` 的 `MATERIALSEEKER_DIM`
+**向量维度改一处必炸。** 目标维度有三处：`apps/web/src/lib/db.ts` 的 `VECTOR_DIM`
+（当前 768）、`apps/web/src/lib/embed.ts` 的校验、本目录 `.env` 的 `MATERIALSEEKER_DIM`
 （默认 768，EG2 原生维度）。三处必须同时改。只改一两处的结果是请求在
 边界值上才失败（截断后维度不匹配的请求才炸），平时不报，联调时很难定位。
 **换维度或换模型后，库里所有已存向量全部作废，必须全量重算**（业务仓
@@ -70,9 +70,9 @@ requirements-video.txt      标准版 8281 的媒体处理与 FunASR
 要求（缺一不跑）：sentence-transformers >=6.1.0、transformers >=5.19.0、
 huggingface_hub >=2.x、torch 2.14.0+cu130（torch 栈从 xinfer-env 复制八个
 目录）。dtype 必须是 bfloat16（服务端自动选，勿改 fp16：NaN 或静默掉分）。
-环境重建方法见项目记忆 embeddinggemma2-spark-deploy-recipe。
+环境重建时按上述版本链逐项核对，不在其他环境之间混用 torch 与 transformers。
 
-ARM64 + GB10 统一内存。部署目录：`~/materialseeker-inference`（代码）+
+ARM64 + GB10 统一内存。部署目录：`~/materialseeker/services/inference`（代码）+
 模型权重 `~/models/embeddinggemma-2`（1.5G）+ ffmpeg `~/ffmpeg-env/bin/ffmpeg`。
 
 启动用本仓 `bash start.sh`（端口反查停旧、起新、日志落 logs/）。
@@ -114,8 +114,7 @@ provider 内 SDK `max_retries=0`（默认那两次退避合计 1.5 秒，扛不�
 GLM-4-Flash-250414、GLM-Z1-Flash），没有视觉能力。接棒的 GLM-5.3-Flash 是付费档
 （¥0.8/M in、¥2.8/M out，2026-10-08 用户已核实，无需再验）。单张图标注成本在
 厘级，批量 178 张的量级是小额，但它是**花钱的**，选型与换模型时先看价格表再动。
-免费模型的清单与巡检方法在 pkm-hub 的 `free-model-api-scout` skill 与
-`pkm-hub-tools` 档案卡，caption 不适用那套免费口径。
+免费模型是否仍可用，以供应商当前价格表和接口实测为准；caption 不按免费模型口径选型。
 
 下载来的视频材料入库前用 ffprobe 确认「有视频流且有音频流」再进链路，
 只看退出码会漏掉合并失败的文件。
