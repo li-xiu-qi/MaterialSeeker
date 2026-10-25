@@ -171,7 +171,7 @@ export function BulkCaptionButton({ formId }: { formId: string }) {
         type="button"
         onClick={run}
         disabled={busy}
-        className="rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200 disabled:opacity-40"
+        className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-neutral-500 hover:text-neutral-200 disabled:opacity-40"
       >
         {busy ? `标注中 ${done}/${total}` : 'AI 标注'}
       </button>
@@ -185,12 +185,12 @@ export function BulkCaptionButton({ formId }: { formId: string }) {
       )}
       {/* 结果与错误就地显示，不弹窗：批量标注是后台事，弹窗会打断人同时去干别的。
           失败原因看一眼文字就知道该重试还是该配置。 */}
-      {summary && <span className="text-[11px] text-emerald-400">{summary}</span>}
-      {err && <span className="text-[11px] text-red-400">{err}</span>}
-      {busy && current && <span className="text-[11px] text-neutral-600">{current}</span>}
+      {summary && <span className="text-xs text-emerald-400">{summary}</span>}
+      {err && <span className="text-xs text-red-400">{err}</span>}
+      {busy && current && <span className="text-xs text-neutral-400">{current}</span>}
       {/* 限流退避中。琥珀色而不是红色：这不是错误，是在等，等完会自己接着跑。
           没有这行的话进度条会停住几十秒，用户只会以为又卡死了。 */}
-      {note && <span className="text-[11px] text-amber-400">{note}</span>}
+      {note && <span className="text-xs text-amber-400">{note}</span>}
     </span>
   )
 }

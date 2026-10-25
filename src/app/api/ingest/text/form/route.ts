@@ -21,7 +21,11 @@ export async function POST(req: Request) {
   const collectionId = normalizeCollectionId(form.get('collectionId') as string | null)
 
   const back = (params: Record<string, string>) => {
-    const q = new URLSearchParams({ lib: String(collectionId), ...params })
+    const q = new URLSearchParams({
+      lib: String(collectionId),
+      k: 'text',
+      ...params,
+    })
     return redirectBack(`/ingest?${q.toString()}`)
   }
 

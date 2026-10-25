@@ -25,7 +25,7 @@ export function BulkDeleteButton({ formId, count }: { formId: string; count: num
           e.preventDefault()
         }
       }}
-      className="rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-red-700 hover:text-red-300"
+      className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-red-700 hover:text-red-300"
     >
       删除所选
     </button>

@@ -116,7 +116,7 @@ export function LibraryEditButton({
         ref={triggerRef}
         type="button"
         onClick={() => setOpen(true)}
-        className="h-fit rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+        className="h-fit rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
       >
         编辑
       </button>
@@ -139,7 +139,7 @@ export function LibraryEditButton({
           >
             <p className="text-sm font-medium text-neutral-200">编辑素材</p>
 
-            <label className="block text-[11px] text-neutral-500" htmlFor={`edit-t-${id}`}>
+            <label className="block text-xs text-neutral-400" htmlFor={`edit-t-${id}`}>
               标题
             </label>
             <input
@@ -147,12 +147,12 @@ export function LibraryEditButton({
               value={t}
               onChange={(e) => setT(e.target.value)}
               maxLength={120}
-              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-neutral-500"
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-500"
             />
 
             {canEditAnnotation && (
               <>
-                <label className="block text-[11px] text-neutral-500" htmlFor={`edit-a-${id}`}>
+                <label className="block text-xs text-neutral-400" htmlFor={`edit-a-${id}`}>
                   {annotationLabel}
                 </label>
                 <textarea
@@ -160,12 +160,12 @@ export function LibraryEditButton({
                   value={a}
                   onChange={(e) => setA(e.target.value)}
                   rows={kind === 'text' ? 6 : 3}
-                  className="w-full resize-y rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] leading-5 text-neutral-200 outline-none focus:border-neutral-500"
+                  className="w-full resize-y rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs leading-5 text-neutral-200 outline-none focus:border-neutral-500"
                 />
               </>
             )}
 
-            <label className="block text-[11px] text-neutral-500" htmlFor={`edit-g-${id}`}>
+            <label className="block text-xs text-neutral-400" htmlFor={`edit-g-${id}`}>
               标签
             </label>
             <input
@@ -173,20 +173,20 @@ export function LibraryEditButton({
               value={g}
               onChange={(e) => setG(e.target.value)}
               placeholder="用逗号分开，例如：访谈，户外"
-              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-neutral-500"
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-500"
             />
-            <p className="text-[11px] leading-4 text-neutral-700">
+            <p className="text-xs leading-4 text-neutral-400">
               标签会并进画面描述一起参与检索，打完标签后搜这些词也能找到它
             </p>
 
-            {err && <p className="text-[11px] text-red-400">{err}</p>}
+            {err && <p className="text-xs text-red-400">{err}</p>}
 
             <div className="flex items-center gap-2 pt-1">
               <button
                 type="button"
                 onClick={save}
                 disabled={saving}
-                className="rounded bg-neutral-100 px-3 py-1 text-[11px] font-medium text-neutral-900 disabled:opacity-40"
+                className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-900 disabled:opacity-40"
               >
                 {saving ? '保存中' : '保存'}
               </button>
@@ -196,12 +196,12 @@ export function LibraryEditButton({
                   setOpen(false)
                   setErr('')
                 }}
-                className="text-[11px] text-neutral-600 hover:text-neutral-300"
+                className="text-xs text-neutral-400 hover:text-neutral-300"
               >
                 取消
               </button>
               {canEditAnnotation && (
-                <span className="ml-auto text-[11px] text-neutral-700">
+                <span className="ml-auto text-xs text-neutral-400">
                   保存后重新计算检索特征，要等一两秒
                 </span>
               )}

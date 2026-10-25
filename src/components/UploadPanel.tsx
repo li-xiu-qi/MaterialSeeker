@@ -493,7 +493,6 @@ export function UploadPanel({
     // 不保证 updater 何时被调用（严格模式下它会跑两次，未来版本还可能延后），
     // 于是「点开始入库」读到 ref 的时刻它可能还没被赋值。直接写是同步的，可靠。
     readyRef.current = [...rows, ...newRows].filter((r) => r.phase === 'ready')
-    console.log('[DBG] stage', { ref: readyRef.current.length, rowsAtCall: rows.length, new: newRows.length })
     setRows((prev) => [...prev, ...newRows])
   }
 
@@ -502,10 +501,6 @@ export function UploadPanel({
     // **读 readyRef 而不是闭包里的 rows**，理由见 readyRef 的注释：选完文件到点
     // 按钮之间可能没有渲染间隙，读 rows 会拿到旧快照，于是静默返回。
     const ready = readyRef.current
-    const dbg = document.createElement('p')
-    dbg.id = 'vs-dbg'
-    dbg.textContent = `DBG start ref=${ready.length} running=${runningRef.current} rows=${rows.length}`
-    document.body.appendChild(dbg)
     if (ready.length === 0 || runningRef.current) return
     runningRef.current = true
     // 这一批离开待命态。**同步清 ref**：否则按钮在重渲染前仍是可点的，
@@ -834,7 +829,7 @@ export function UploadPanel({
     <section className="mt-6 rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-neutral-200">入库</h2>
-        <p className="text-[11px] text-neutral-600">{HINT_BY_KIND[accept]}</p>
+        <p className="text-xs text-neutral-400">{HINT_BY_KIND[accept]}</p>
       </div>
 
       {/*
@@ -846,7 +841,7 @@ export function UploadPanel({
         这三个字没反应，而 select 照样能操作，这种半坏的状态最难查。
       */}
       <div className="mt-3 flex items-center gap-2">
-        <label htmlFor={`ingest-collection-${accept}`} className="text-[11px] text-neutral-500">
+        <label htmlFor={`ingest-collection-${accept}`} className="text-xs text-neutral-400">
           入库到
         </label>
         <select
@@ -910,7 +905,7 @@ export function UploadPanel({
             是把 onboarding 文案变成一段错误码，而用户真正需要的只有一句「我拍的
             这个能不能放进来」。视频会慢是关键信息，留它。
           */}
-          <p className="mt-1 text-xs text-neutral-600">{SPEED_HINT_BY_KIND[accept]}</p>
+          <p className="mt-1 text-xs text-neutral-400">{SPEED_HINT_BY_KIND[accept]}</p>
           <input
             ref={inputRef}
             name="file"
@@ -967,14 +962,14 @@ export function UploadPanel({
         <div className="mt-4 rounded-md border border-neutral-800 bg-neutral-950/40 p-3">
           <div className="flex items-baseline justify-between">
             <p className="text-sm font-medium text-neutral-200">
-              待入库 <span className="text-neutral-500">{readyRows.length} 个文件</span>
+              待入库 <span className="text-neutral-400">{readyRows.length} 个文件</span>
             </p>
             <button
               type="button"
               onClick={() => {
                 for (const r of readyRows) unstage(r.key)
               }}
-              className="text-[11px] text-neutral-500 underline hover:text-neutral-300"
+              className="text-xs text-neutral-400 underline hover:text-neutral-300"
             >
               全部撤掉
             </button>
@@ -987,26 +982,26 @@ export function UploadPanel({
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={r.localUrl} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] text-neutral-600">
+                    <div className="flex h-full w-full items-center justify-center text-[10px] text-neutral-400">
                       {r.kind === 'video' ? '视频' : '文件'}
                     </div>
                   )}
                 </div>
-                <p className="mt-1 truncate text-[10px] text-neutral-500" title={r.name}>
+                <p className="mt-1 truncate text-[10px] text-neutral-400" title={r.name}>
                   {r.name}
                 </p>
                 <button
                   type="button"
                   onClick={() => unstage(r.key)}
                   aria-label={`撤掉 ${r.name}`}
-                  className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-neutral-950/80 text-[11px] text-neutral-300 hover:bg-red-950 hover:text-red-300 group-hover:flex"
+                  className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-neutral-950/80 text-xs text-neutral-300 hover:bg-red-950 hover:text-red-300 group-hover:flex"
                 >
                   ×
                 </button>
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[11px] text-neutral-600">
+          <p className="mt-2 text-xs text-neutral-400">
             检查一下有没有选错，点上面的「开始入库」才会上传
           </p>
         </div>
@@ -1023,19 +1018,19 @@ export function UploadPanel({
       */}
       {checkedRows.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-neutral-700 bg-neutral-900/60 px-3 py-2">
-          <span className="text-[11px] text-neutral-400">已选 {checkedRows.length} 张</span>
+          <span className="text-xs text-neutral-400">已选 {checkedRows.length} 张</span>
           <button
             type="button"
             disabled={batchBusy}
             onClick={() => void analyzeChecked()}
-            className="rounded bg-neutral-100 px-3 py-1 text-[11px] font-medium text-neutral-900 disabled:opacity-40"
+            className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-900 disabled:opacity-40"
           >
             {batchBusy ? batchMsg || '标注中' : `AI 标注这 ${checkedRows.length} 张`}
           </button>
           <button
             type="button"
             onClick={() => setChecked(new Set())}
-            className="text-[11px] text-neutral-500 underline hover:text-neutral-300"
+            className="text-xs text-neutral-400 underline hover:text-neutral-300"
           >
             取消选择
           </button>
@@ -1048,20 +1043,20 @@ export function UploadPanel({
         全失败时更要看到——那是唯一能告诉用户该重试还是该配 key 的一句话。
       */}
       {batchMsg && !batchBusy && (
-        <p className="mt-2 text-[11px] text-neutral-400">{batchMsg}</p>
+        <p className="mt-2 text-xs text-neutral-400">{batchMsg}</p>
       )}
-      {batchErr && <p className="mt-1 text-[11px] text-red-400">{batchErr}</p>}
+      {batchErr && <p className="mt-1 text-xs text-red-400">{batchErr}</p>}
 
       {rows.length > 0 && (
         <div className="mt-4 border-t border-neutral-800 pt-3">
           {/* 总览。视频是分钟级，明确告诉用户没卡死、还要等多久 */}
-          <div className="flex items-baseline justify-between text-[11px]">
+          <div className="flex items-baseline justify-between text-xs">
             <span className="text-neutral-300">
               {doneCount}/{rows.length} 已完成
               {errorCount > 0 && <span className="text-red-400"> · {errorCount} 个失败</span>}
             </span>
             {busy && (
-              <span className="text-neutral-500">
+              <span className="text-neutral-400">
                 已用 {fmtElapsed(Date.now() - batchStartedAt.current)}
                 {activeName ? ` · 正在处理 ${activeName}` : ''}
               </span>
@@ -1102,7 +1097,7 @@ export function UploadPanel({
                   </span>
                   {/* 恢复的行没有文件大小（任务行里没这一列），不显示 0KB 这种假数字 */}
                   {!r.restored && (
-                    <span className="flex-none text-[10px] text-neutral-600">{fmtSize(r.size)}</span>
+                    <span className="flex-none text-[10px] text-neutral-400">{fmtSize(r.size)}</span>
                   )}
                   {/* 待命行不显示阶段标签：它们还没开始，正在上面的待命区排队 */}
                   {r.phase !== 'ready' && <PhaseTag phase={r.phase} stage={r.stage} pct={r.pct} />}
@@ -1177,7 +1172,7 @@ export function UploadPanel({
                 </div>
 
                 <div className="mt-1 flex items-center justify-between gap-2 text-[10px]">
-                  <span className="min-w-0 flex-1 truncate text-neutral-500">
+                  <span className="min-w-0 flex-1 truncate text-neutral-400">
                     {r.phase === 'uploading'
                       ? `上传中 ${r.upload}%`
                       : r.detail
@@ -1225,7 +1220,7 @@ export function UploadPanel({
           {!busy && doneCount > 0 && (
             <Link
               href={`/?lib=${targetId}`}
-              className="mt-3 inline-block rounded-md border border-neutral-700 px-3 py-1.5 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-neutral-100"
+              className="mt-3 inline-block rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-neutral-100"
             >
               去检索这个库
             </Link>
@@ -1307,7 +1302,7 @@ function PhaseTag({ phase, stage, pct }: { phase: Phase; stage: string; pct: num
       : phase === 'done'
         ? 'text-emerald-400'
         : phase === 'waiting'
-          ? 'text-neutral-600'
+          ? 'text-neutral-400'
           : 'text-neutral-300'
   const text =
     phase === 'ready'

@@ -15,7 +15,7 @@ export function BrandMark({ size = 28 }: { size?: number }) {
       className="flex-none rounded-md"
     >
       <rect width="24" height="24" rx="6" fill="#171717" />
-      <circle cx="10.5" cy="10.5" r="5" fill="none" stroke="#f5f5f5" stroke-width="2" />
+      <circle cx="10.5" cy="10.5" r="5" fill="none" stroke="#f5f5f5" strokeWidth="2" />
       <path d="M8 13 L10 9.8 L11.8 12 L12.9 10.4 L14.8 13 Z" fill="#f5f5f5" />
       <line
         x1="14.4"

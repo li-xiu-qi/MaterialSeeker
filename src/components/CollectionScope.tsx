@@ -69,7 +69,7 @@ export function CollectionScope({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] text-neutral-600">{label}</span>
+      <span className="text-xs text-neutral-400">{label}</span>
 
       <form action={pathname} method="get" className="flex items-center gap-1.5">
         {hidden.map(([k, v]) => (
@@ -84,7 +84,7 @@ export function CollectionScope({
           name="lib"
           defaultValue={currentId === ALL ? 'all' : String(currentId)}
           aria-label={label}
-          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-300 outline-none focus:border-neutral-500"
+          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-500"
         >
           <option value="all">全部库</option>
           {collections.map((c) => (
@@ -95,7 +95,7 @@ export function CollectionScope({
         </ScrollSafeSelect>
         <button
           type="submit"
-          className="rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+          className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
         >
           切换
         </button>
@@ -103,7 +103,7 @@ export function CollectionScope({
 
       {/* details 是原生折叠，展开与提交都不需要 JS */}
       <details className="relative">
-        <summary className="cursor-pointer rounded border border-dashed border-neutral-700 px-2 py-1 text-[11px] text-neutral-500 marker:content-none hover:border-neutral-500 hover:text-neutral-200">
+        <summary className="cursor-pointer rounded border border-dashed border-neutral-700 px-2 py-1 text-xs text-neutral-400 marker:content-none hover:border-neutral-500 hover:text-neutral-200">
           + 新建
         </summary>
         <form
@@ -112,7 +112,7 @@ export function CollectionScope({
           className="absolute left-0 top-8 z-10 w-56 space-y-2 rounded-md border border-neutral-700 bg-neutral-950 p-3 shadow-lg"
         >
           <input type="hidden" name="next" value={pathname} />
-          <label className="block text-[11px] text-neutral-500" htmlFor="new-collection-name">
+          <label className="block text-xs text-neutral-400" htmlFor="new-collection-name">
             新素材库名称
           </label>
           <input
@@ -120,11 +120,11 @@ export function CollectionScope({
             name="name"
             maxLength={40}
             placeholder="例如：访谈素材"
-            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-neutral-500"
+            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-500"
           />
           <button
             type="submit"
-            className="w-full rounded bg-neutral-100 px-2 py-1 text-[11px] font-medium text-neutral-900"
+            className="w-full rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-900"
           >
             创建
           </button>
@@ -133,7 +133,7 @@ export function CollectionScope({
 
       {/* 新建成功的反馈：说清建了什么，并把下一步的两个出口摆出来 */}
       {justMadeId && justMadeName && (
-        <span className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-emerald-400">已创建「{justMadeName}」</span>
           <a href={switchHref(justMadeId)} className="text-neutral-400 underline hover:text-neutral-200">
             切到它

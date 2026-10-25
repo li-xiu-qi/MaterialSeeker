@@ -142,7 +142,7 @@ export function AssetEditModal({
         <p className="text-sm font-medium text-neutral-200">编辑素材信息</p>
 
         <div>
-          <label htmlFor="edit-title" className="block text-[11px] text-neutral-500">
+          <label htmlFor="edit-title" className="block text-xs text-neutral-400">
             标题
           </label>
           <input
@@ -157,7 +157,7 @@ export function AssetEditModal({
 
         {canEditCaption && (
           <div>
-            <label htmlFor="edit-caption" className="block text-[11px] text-neutral-500">
+            <label htmlFor="edit-caption" className="block text-xs text-neutral-400">
               画面描述
             </label>
             <textarea
@@ -168,21 +168,21 @@ export function AssetEditModal({
               placeholder="例如：穿白色运动服的运动员在草地网球场，手持球拍高举手臂准备发球"
               className="mt-1 w-full resize-y rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm leading-6 text-neutral-200 outline-none focus:border-neutral-500"
             />
-            <p className="mt-1 text-[11px] text-neutral-700">
+            <p className="mt-1 text-xs text-neutral-400">
               这段话是检索的主要依据，写清楚画面里有什么
             </p>
           </div>
         )}
 
         {!canEditCaption && (
-          <p className="rounded border border-neutral-800 bg-neutral-900/50 px-2 py-1.5 text-[11px] leading-5 text-neutral-600">
+          <p className="rounded border border-neutral-800 bg-neutral-900/50 px-2 py-1.5 text-xs leading-5 text-neutral-400">
             {kind === 'video' ? '视频' : '音频'}没有整段描述可填，它的内容在逐字稿里，
             改标题与标签即可
           </p>
         )}
 
         <div>
-          <label htmlFor="edit-tags" className="block text-[11px] text-neutral-500">
+          <label htmlFor="edit-tags" className="block text-xs text-neutral-400">
             标签
           </label>
           <input
@@ -192,12 +192,12 @@ export function AssetEditModal({
             placeholder="用逗号分开，例如：访谈，开场白"
             className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 outline-none focus:border-neutral-500"
           />
-          <p className="mt-1 text-[11px] text-neutral-700">
+          <p className="mt-1 text-xs text-neutral-400">
             最多 {MAX_TAGS} 个。标签也会参与检索，填你之后会用来搜的词
           </p>
         </div>
 
-        {err && <p className="text-[11px] text-red-400">{err}</p>}
+        {err && <p className="text-xs text-red-400">{err}</p>}
 
         <div className="flex items-center gap-2 pt-1">
           <button
@@ -211,7 +211,7 @@ export function AssetEditModal({
           <button
             type="button"
             onClick={onClose}
-            className="text-sm text-neutral-600 hover:text-neutral-300"
+            className="text-sm text-neutral-400 hover:text-neutral-300"
           >
             取消
           </button>

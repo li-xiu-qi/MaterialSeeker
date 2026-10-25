@@ -17,14 +17,14 @@ export function TextIngestForm({
     <section className="mt-6 rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-neutral-200">入库文本</h2>
-        <p className="text-[11px] text-neutral-600">笔记、文案、台词，填进去就能被检索</p>
+        <p className="text-xs text-neutral-400">笔记、文案、台词，填进去就能被检索</p>
       </div>
 
       <form action="/api/ingest/text/form" method="post" className="mt-3 space-y-3">
         <input type="hidden" name="collectionId" value={currentCollectionId} />
 
         <div>
-          <label htmlFor="text-title" className="block text-[11px] text-neutral-500">
+          <label htmlFor="text-title" className="block text-xs text-neutral-400">
             标题
           </label>
           <input
@@ -38,7 +38,7 @@ export function TextIngestForm({
         </div>
 
         <div>
-          <label htmlFor="text-content" className="block text-[11px] text-neutral-500">
+          <label htmlFor="text-content" className="block text-xs text-neutral-400">
             内容
           </label>
           <textarea

@@ -108,7 +108,7 @@ export async function GET(req: Request) {
   await rm(dir, { recursive: true, force: true }).catch(() => {})
 
   const stamp = new Date().toISOString().slice(0, 10)
-  return new NextResponse(buf, {
+  return new NextResponse(Uint8Array.from(buf), {
     status: 200,
     headers: {
       'Content-Type': 'application/zip',

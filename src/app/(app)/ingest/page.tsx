@@ -111,12 +111,12 @@ export default async function IngestPage({
             {name ? `：${name}` : ''}
           </p>
           {failN > 0 && (
-            <p className="mt-1 text-[11px] text-amber-300/80">
+            <p className="mt-1 text-xs text-amber-300/80">
               有 {failN} 个没进去{failDetail ? `：${failDetail}` : ''}。文件若已落到素材目录，
               可以重新选它再试。
             </p>
           )}
-          <Link href={`/?lib=${currentId}`} className="mt-1 inline-block text-[11px] underline">
+          <Link href={`/?lib=${currentId}`} className="mt-1 inline-block text-xs underline">
             去检索这个库
           </Link>
         </div>
@@ -128,7 +128,7 @@ export default async function IngestPage({
             文本「{textTitle}」已入库（#{textId}）
             {chars ? ` · ${chars} 字` : ''}
           </p>
-          <Link href={`/?lib=${currentId}`} className="mt-1 inline-block text-[11px] underline">
+          <Link href={`/?lib=${currentId}`} className="mt-1 inline-block text-xs underline">
             去检索这个库
           </Link>
         </div>

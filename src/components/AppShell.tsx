@@ -1,6 +1,6 @@
 'use client'
 
-import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { BrandMark } from './BrandMark'
 
@@ -13,10 +13,10 @@ import { BrandMark } from './BrandMark'
  * 二，顶栏页签会把「去另一边」降级成次级操作；
  * 三，后面还会长第四个入口，边栏不用为此重构。
  *
- * **侧边栏只放用户主动发起的入口。** 检索范围（在哪个库里搜）不放这里：它是
- * 页面级参数，与「去哪个页面」不同级；而且它只对检索与素材库两页有意义，对
- * 入库页完全没用。放在边栏里它就和三个导航项抢注意力，用户还得先理解「这跟
- * 上面那三个不是一回事」。它现在由各页面自己的 CollectionScope 呈现。
+ * **侧边栏只放用户主动发起的入口。** 检索范围（在哪个库里搜）的选择器不放这里：
+ * 它是页面级参数，与「去哪个页面」不同级，由各页面自己的 CollectionScope 呈现。
+ * 导航只负责在跳转时保留当前 lib，避免搜索、入库、素材库之间切换时悄悄回到默认库。
+ * 入库页同样从 lib 读取目标库，因此三个入口都保留这个参数。
  *
  * **后台任务队列也不放这里。** 它在导航侧边栏挂过一段时间，理由是「任务进度只
  * 存在在发起它的那个页面，用户切走就看不见」。这个理由不成立：真实的等待发生
@@ -25,7 +25,9 @@ import { BrandMark } from './BrandMark'
  * 对检索页与素材库页毫无意义。层级上任务进度属于入库页的上下文，不属于导航。
  * 现已移进入库页自己的右侧栏。
  *
- * 本文件是客户端组件，唯一的原因是要用 usePathname 高亮当前项。
+ * 本文件是客户端组件：用 usePathname 高亮当前项，挂载后从 location 保留素材库范围。
+ * 三个主入口用原生链接做整页导航，不把范围保留与页面切换依赖在 Next.js 客户端路由器上。
+ * effect 在首帧后同步当前 lib，也不会造成 SSR 与 hydration 的链接不一致。
  */
 
 const NAV = [
@@ -34,8 +36,52 @@ const NAV = [
   { href: '/library', label: '素材库', hint: '浏览与管理' },
 ]
 
+function NavLinks({
+  pathname,
+  collectionScope,
+}: {
+  pathname: string
+  collectionScope: string | null
+}) {
+  return NAV.map((item) => {
+    // 前缀匹配，/library 与 /ingest 下的子页也要高亮对应项
+    const active =
+      item.href === '/'
+        ? pathname === '/'
+        : pathname === item.href || pathname.startsWith(`${item.href}/`)
+    const href = collectionScope
+      ? `${item.href}?lib=${encodeURIComponent(collectionScope)}`
+      : item.href
+    return (
+      <a
+        key={item.href}
+        href={href}
+        className={`block rounded-md px-3 py-2 text-sm transition ${
+          active
+            ? 'bg-neutral-100 font-medium text-neutral-900'
+            : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100'
+        }`}
+      >
+        {item.label}
+        <span className="mt-0.5 block text-xs text-neutral-400">{item.hint}</span>
+      </a>
+    )
+  })
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const [collectionScope, setCollectionScope] = useState<string | null>(null)
+
+  useEffect(() => {
+    const syncCollectionScope = () => {
+      const next = new URLSearchParams(window.location.search).get('lib')
+      setCollectionScope((current) => (current === next ? current : next))
+    }
+    syncCollectionScope()
+    window.addEventListener('popstate', syncCollectionScope)
+    return () => window.removeEventListener('popstate', syncCollectionScope)
+  }, [pathname])
 
   return (
     <div className="flex min-h-screen">
@@ -58,38 +104,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <BrandMark size={28} />
           <div className="min-w-0">
             <p className="truncate text-base font-semibold text-neutral-100">素材搜索</p>
-            <p className="mt-0.5 truncate text-[11px] text-neutral-600">多模态内容搜索工作台</p>
+            <p className="mt-0.5 truncate text-xs text-neutral-400">多模态内容搜索工作台</p>
           </div>
         </div>
 
         <nav className="mt-6 space-y-1">
-          {NAV.map((item) => {
-            // 前缀匹配，/library 与 /ingest 下的子页也要高亮对应项
-            const active =
-              item.href === '/'
-                ? pathname === '/'
-                : pathname === item.href || pathname.startsWith(`${item.href}/`)
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`block rounded-md px-3 py-2 text-sm transition ${
-                  active
-                    ? 'bg-neutral-100 font-medium text-neutral-900'
-                    : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100'
-                }`}
-              >
-                {item.label}
-                <span
-                  className={`mt-0.5 block text-[11px] ${
-                    active ? 'text-neutral-600' : 'text-neutral-700'
-                  }`}
-                >
-                  {item.hint}
-                </span>
-              </Link>
-            )
-          })}
+          <NavLinks pathname={pathname} collectionScope={collectionScope} />
         </nav>
 
       </aside>

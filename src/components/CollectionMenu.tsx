@@ -36,9 +36,9 @@ const ALL = 0;
 const menuBox =
   "absolute right-0 top-8 z-10 w-64 space-y-3 rounded-md border border-neutral-700 bg-neutral-950 p-3 shadow-lg";
 const fieldBtn =
-  "w-full rounded border border-neutral-700 px-2 py-1 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-neutral-100";
+  "w-full rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:border-neutral-500 hover:text-neutral-100";
 const inputCls =
-  "w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-neutral-500";
+  "w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-500";
 
 export function CollectionMenu({
   collectionId,
@@ -77,7 +77,7 @@ export function CollectionMenu({
     <>
       <details className="relative">
         <summary
-          className="cursor-pointer list-none rounded border border-neutral-700 px-2 py-1 text-[11px] leading-4 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+          className="cursor-pointer list-none rounded border border-neutral-700 px-2 py-1 text-xs leading-4 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
           title="重命名或删除当前素材库"
         >
           ⋯
@@ -86,14 +86,14 @@ export function CollectionMenu({
         {/* 全部库态没有单一「当前库」可管，说清为什么不给操作 */}
         {collectionId === ALL || !collectionName ? (
           <div className={menuBox}>
-            <p className="text-[11px] leading-4 text-neutral-400">
+            <p className="text-xs leading-4 text-neutral-400">
               当前是全部库。先切到某一个库，才能改名或删除。
             </p>
           </div>
         ) : (
           <div className={menuBox}>
             <p
-              className="truncate text-[11px] text-neutral-500"
+              className="truncate text-xs text-neutral-400"
               title={collectionName}
             >
               {collectionName}
@@ -108,7 +108,7 @@ export function CollectionMenu({
               <input type="hidden" name="next" value={pathname} />
               <input type="hidden" name="id" value={collectionId} />
               <label
-                className="block text-[11px] text-neutral-500"
+                className="block text-xs text-neutral-400"
                 htmlFor="menu-rename"
               >
                 新名称
@@ -148,7 +148,7 @@ export function CollectionMenu({
               <input type="hidden" name="id" value={collectionId} />
               {isDefault ? (
                 /* 默认库是兜底的那个，删了存量素材的 collection_id 全部悬空 */
-                <p className="text-[11px] leading-4 text-neutral-500">
+                <p className="text-xs leading-4 text-neutral-400">
                   默认库不可删除，它是兜底的那个。
                 </p>
               ) : (
@@ -156,7 +156,7 @@ export function CollectionMenu({
                   {/* 无 JS 时的确认门槛。这个框必须真的在页面上：JS 失效时
                     onSubmit 不存在，原生提交照常发生，它就是唯一的确认。
                     藏起来等于无 JS 的用户没有任何确认就删了库。 */}
-                  <label className="flex items-start gap-1.5 text-[11px] leading-4 text-neutral-400">
+                  <label className="flex items-start gap-1.5 text-xs leading-4 text-neutral-400">
                     <input
                       ref={confirmRef}
                       type="checkbox"
@@ -168,7 +168,7 @@ export function CollectionMenu({
                   </label>
                   <button
                     type="submit"
-                    className="w-full rounded border border-red-800 px-2 py-1 text-[11px] text-red-300 hover:bg-red-950/50"
+                    className="w-full rounded border border-red-800 px-2 py-1 text-xs text-red-300 hover:bg-red-950/50"
                   >
                     删除这个库
                   </button>
@@ -209,7 +209,7 @@ export function CollectionMenu({
               条素材的检索记录会一并删除，之后按内容搜不到它们。
               素材文件仍保留在素材目录，重新入库即可恢复可检索状态。
             </p>
-            <p className="mt-1.5 text-xs leading-5 text-neutral-500">
+            <p className="mt-1.5 text-xs leading-5 text-neutral-400">
               这个操作不能撤销。
             </p>
 

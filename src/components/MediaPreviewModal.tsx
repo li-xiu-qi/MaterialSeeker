@@ -78,7 +78,7 @@ export function MediaPreviewModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-none rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+            className="flex-none rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
           >
             关闭
           </button>

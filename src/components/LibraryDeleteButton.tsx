@@ -41,7 +41,7 @@ export function LibraryDeleteButton({ id, title }: { id: number; title: string }
       type="button"
       disabled={removing || pending}
       onClick={remove}
-      className="h-fit flex-none rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-40"
+      className="h-fit flex-none rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-red-700 hover:text-red-300 disabled:opacity-40"
     >
       {removing ? '删除中' : '删除'}
     </button>
