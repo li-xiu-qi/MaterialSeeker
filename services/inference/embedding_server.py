@@ -313,9 +313,9 @@ def caption(req: CaptionRequest) -> dict:
         # 装 openai 包是部署步骤，不该在请求里才暴露成一堆 import 栈
         raise HTTPException(503, "推理服务缺少 openai 依赖，无法调用视觉模型")
 
-    api_key = os.environ.get("GLM_API_KEY", "")
+    api_key = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("GLM_API_KEY", "")
     if not api_key:
-        raise HTTPException(503, "未配置 GLM_API_KEY，无法生成标注")
+        raise HTTPException(503, "未配置视觉模型 API Key，无法生成标注")
 
     client = OpenAI(api_key=api_key, base_url=GLM_BASE_URL)
     try:

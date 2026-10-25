@@ -48,7 +48,7 @@ FTS5 使用 external content 模式，写入靠触发器同步。索引侧中文
 
 数据根目录默认是 `<monorepo 上级>/app_datas/`，可用 `MATERIALSEEKER_DATA_DIR` 覆盖。推理地址用 `MATERIALSEEKER_INFERENCE_URL` 与 `MATERIALSEEKER_VIDEO_URL` 覆盖。
 
-局域网访问 dev server 时，可用逗号分隔的 `MATERIALSEEKER_DEV_ORIGINS` 指定允许的来源；默认只包含 `localhost` 与 `127.0.0.1`。真实地址、密钥和个人路径不要写入公开配置或文档。
+API Key 的获取与配置见 [API 密钥与运行配置](docs/configuration.md)。局域网访问 dev server 时，可用逗号分隔的 `MATERIALSEEKER_DEV_ORIGINS` 指定允许的来源；默认只包含 `localhost` 与 `127.0.0.1`。真实地址、密钥和个人路径不要写入公开配置或文档。
 
 ## 修改 schema 后
 

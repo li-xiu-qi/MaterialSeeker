@@ -51,6 +51,19 @@ In short: **go from “I remember this” to “here is the frame I can create w
 | Asset management | Edit titles, captions, and tags; bulk delete, copy, move, and export assets |
 | Flexible deployment | A light profile without GPU requirements and a standard profile with local vectors, connected over HTTP |
 
+## Documentation
+
+Start with the document that matches your goal:
+
+| What you need | Where to go |
+| --- | --- |
+| Get the project running | [Quick start](#quick-start) |
+| Configure API keys, choose models, or troubleshoot configuration | [API keys and runtime configuration](docs/configuration.en.md) |
+| Inspect inference endpoints, models, and deployment details | [Inference service guide](services/inference/README.md) |
+| Review demo media sources and licenses | [Demo media sources](docs/demo-media.md) |
+| Contribute, run tests, or review synchronization rules | [Development guide](AGENTS.md) |
+| Read the license | [Apache-2.0](LICENSE) |
+
 ## UI preview
 
 **Unified search: course frames and transcript hits in one result set**
@@ -127,6 +140,8 @@ bash start.sh
 ```
 
 For vector-based semantic retrieval, use `standard` and configure the model and the two separate Python environments described in the same guide.
+
+For API key setup, required credentials, and troubleshooting, see [API keys and runtime configuration](docs/configuration.en.md).
 
 ## Related projects
 

@@ -921,7 +921,7 @@ def analyze(req: AnalyzeRequest):
         # 的节奏做，那边能一边等一边给用户报进度，藏在这里重试是静默的，用户只会
         # 看到进度卡住不动。
         client = OpenAI(
-            api_key=os.environ.get("GLM_API_KEY", ""),
+            api_key=os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("GLM_API_KEY", ""),
             base_url=os.environ.get("OPENAI_API_BASE", "https://open.bigmodel.cn/api/paas/v4"),
             max_retries=0,
         )
