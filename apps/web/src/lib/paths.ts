@@ -2,10 +2,11 @@ import path from 'node:path'
 import fs from 'node:fs'
 
 /**
- * 存储布局。全库唯一数据根，默认 <repo>/app_datas，
+ * 存储布局。全库唯一数据根，默认 <monorepo 上级>/app_datas，
  * 可用 MATERIALSEEKER_DATA_DIR 覆盖（dgx-spark 上指向 ~/materialseeker-data）。
+ * 业务应用位于 apps/web，因此默认上级比应用工作目录高三级，保持迁移前的数据落点。
  */
-const repoRoot = process.env.MATERIALSEEKER_REPO_ROOT || path.resolve(process.cwd(), '..')
+const repoRoot = process.env.MATERIALSEEKER_REPO_ROOT || path.resolve(process.cwd(), '..', '..', '..')
 const dataDir = process.env.MATERIALSEEKER_DATA_DIR || path.join(repoRoot, 'app_datas')
 
 export const PATHS = {
