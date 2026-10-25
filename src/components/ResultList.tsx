@@ -56,10 +56,14 @@ export function ResultList({ items }: Props) {
             key={it.key}
             className="rounded-md border border-neutral-800 bg-neutral-900/60 p-4"
           >
-            <div className="flex items-center gap-2 text-xs text-neutral-500">
-              <span className="rounded bg-neutral-800 px-1.5 py-0.5">{typeLabel(it.type)}</span>
+            <div className="flex items-center gap-2 text-xs text-neutral-400">
+              <span className="rounded bg-neutral-800 px-1.5 py-0.5">
+                {it.chunk && !it.chunk.videoUrl ? '文本' : typeLabel(it.type)}
+              </span>
               <span>{sourceLabel(it.source)}</span>
-              <span className="ml-auto tabular-nums text-neutral-400">{fmtScore(it.score)}</span>
+              {it.source !== 'keyword' && (
+                <span className="ml-auto tabular-nums text-neutral-400">{fmtScore(it.score)}</span>
+              )}
             </div>
 
             {it.chunk ? (
@@ -107,7 +111,7 @@ export function ResultList({ items }: Props) {
 
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-neutral-300">{it.text || '（无描述）'}</p>
-                  <p className="mt-1 text-xs text-neutral-500">{it.meta}</p>
+                  <p className="mt-1 text-xs text-neutral-400">{it.meta}</p>
                 </div>
               </div>
             )}

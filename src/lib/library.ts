@@ -102,6 +102,8 @@ export interface VideoDetail {
     title: string
     sourcePath: string | null
     createdAt: string
+    /** 视频流时长；旧数据可能尚未回填，为 null 时界面显示未知。 */
+    durationMs: number | null
     meta: Record<string, unknown>
   }
   videoUrl: string | null
@@ -656,13 +658,16 @@ export function getAudioDetail(id: number): AudioDetail | null {
 export function getVideoDetail(id: number): VideoDetail | null {
   const db = getDb()
   const asset = db
-    .prepare('SELECT id, kind, title, source_path, created_at, meta_json FROM assets WHERE id = ?')
+    .prepare(
+      'SELECT id, kind, title, source_path, duration_ms, created_at, meta_json FROM assets WHERE id = ?',
+    )
     .get(id) as
     | {
         id: number
         kind: string
         title: string
         source_path: string | null
+        duration_ms: number | null
         created_at: string
         meta_json: string | null
       }
@@ -726,6 +731,7 @@ export function getVideoDetail(id: number): VideoDetail | null {
       title: asset.title,
       sourcePath: asset.source_path,
       createdAt: asset.created_at,
+      durationMs: asset.duration_ms,
       meta: asset.meta_json ? (JSON.parse(asset.meta_json) as Record<string, unknown>) : {},
     },
     videoUrl: toMediaUrl(asset.source_path),

@@ -24,6 +24,7 @@ const encodeBatch = vi.fn(
 
 vi.mock('./embed', () => ({
   PASSAGE_INSTRUCTION: ' Represent this text for retrieval.',
+  embeddingEnabled: () => true,
   encodeBatch: (req: unknown) => encodeBatch(req as never),
 }))
 

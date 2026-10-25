@@ -14,9 +14,10 @@
  */
 
 import { getDb, cosineSim, blobToEmbedding, embeddingToBlob, VECTOR_DIM } from './db'
-import { encodeText } from './embed'
+import { embeddingEnabled, encodeText } from './embed'
 import { segForQuery, toFtsMatch } from './segment'
 import { DEFAULT_COLLECTION_ID, scopeClause, scopeArgs } from './collections'
+import { likePattern } from './libraryFilter'
 import type { AssetKind } from './db'
 
 export type ModalityFilter = 'all' | 'video' | 'image' | 'audio' | 'text'
@@ -58,7 +59,7 @@ export interface FrameHit {
   type: 'frame'
   id: number
   score: number
-  source: 'frame_vector' | 'caption_vector'
+  source: 'frame_vector' | 'caption_vector' | 'keyword'
   assetId: number
   assetTitle: string
   timestampMs: number
@@ -106,6 +107,8 @@ export async function search(
   query: string,
   opts: { modality?: ModalityFilter; topK?: number; collectionId?: number } = {},
 ): Promise<SearchHit[]> {
+  if (!embeddingEnabled()) return searchWithoutEmbedding(query, opts)
+
   const modality = opts.modality ?? 'all'
   const topK = opts.topK ?? 30
   const perRouteK = perRoute(topK)
@@ -332,6 +335,150 @@ export async function search(
   }
 
   // 等权合并：同一 id 同 source 只留最高分，然后按分排序
+  const best = new Map<string, SearchHit>()
+  for (const h of hits) {
+    const key = `${h.type}:${h.id}:${h.source}`
+    const prev = best.get(key)
+    if (!prev || h.score > prev.score) best.set(key, h)
+  }
+  return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK)
+}
+
+/**
+ * 轻量版检索：不请求向量服务。逐字稿走 FTS5，图片与关键帧走标题、标签、
+ * 描述的 LIKE 关键词匹配。ASR 与视觉描述仍照常入库，所以两条核心生产链
+ * 在轻量版里继续为检索提供文本。
+ */
+async function searchWithoutEmbedding(
+  query: string,
+  opts: { modality?: ModalityFilter; topK?: number; collectionId?: number },
+): Promise<SearchHit[]> {
+  const modality = opts.modality ?? 'all'
+  const topK = opts.topK ?? 30
+  const perRouteK = perRoute(topK)
+  const collectionId = opts.collectionId ?? DEFAULT_COLLECTION_ID
+  const scope = scopeClause(collectionId)
+  const scopeArg = scopeArgs(collectionId)
+  const db = getDb()
+  const hits: SearchHit[] = []
+
+  const tokens = segForQuery(query)
+  const ftsQuery = tokens.length ? toFtsMatch(tokens) : ''
+  const chunkKinds = modality === 'all' ? ['video', 'audio', 'text'] : modality === 'image' ? [] : [modality]
+  if (ftsQuery && chunkKinds.length > 0) {
+    const placeholders = chunkKinds.map(() => '?').join(',')
+    const rows = db
+      .prepare(
+        `SELECT c.id, c.text, c.start_ms, c.end_ms, a.id AS asset_id, a.title,
+                a.source_path AS asset_path, a.kind AS asset_kind,
+                (SELECT f.thumb_path FROM frames f WHERE f.asset_id = a.id
+                  ORDER BY f.timestamp_ms LIMIT 1) AS cover_frame,
+                bm25(chunks_fts) AS rank
+         FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
+         JOIN transcripts t ON t.id = c.transcript_id
+         JOIN assets a ON a.id = t.asset_id
+         WHERE chunks_fts MATCH ? ${scope} AND a.kind IN (${placeholders})
+         ORDER BY rank LIMIT ?`,
+      )
+      .all(ftsQuery, ...scopeArg, ...chunkKinds, perRouteK) as Array<{
+      id: number
+      text: string
+      start_ms: number
+      end_ms: number
+      asset_id: number
+      title: string
+      asset_path: string | null
+      asset_kind: AssetKind
+      cover_frame: string | null
+      rank: number
+    }>
+
+    for (const r of rows) {
+      const sents = db
+        .prepare('SELECT start_ms, end_ms, text FROM sentences WHERE chunk_id = ? ORDER BY start_ms')
+        .all(r.id) as SentenceHit[]
+      hits.push({
+        type: 'chunk',
+        id: r.id,
+        score: -r.rank / 10,
+        source: 'keyword',
+        assetId: r.asset_id,
+        assetTitle: r.title,
+        assetPath: r.asset_path,
+        assetKind: r.asset_kind,
+        coverFrame: r.cover_frame,
+        chunkText: r.text,
+        startMs: r.start_ms,
+        endMs: r.end_ms,
+        sentences: sents,
+      })
+    }
+  }
+
+  const pattern = likePattern(query)
+  if (pattern && (modality === 'all' || modality === 'video')) {
+    const frames = db
+      .prepare(
+        `SELECT f.id, f.timestamp_ms, f.thumb_path, f.caption,
+                a.id AS asset_id, a.title
+         FROM frames f JOIN assets a ON a.id = f.asset_id
+         WHERE (a.title LIKE ? ESCAPE '\\' OR COALESCE(f.caption, '') LIKE ? ESCAPE '\\'
+                OR a.tags_json LIKE ? ESCAPE '\\') ${scope}
+         ORDER BY f.id DESC LIMIT ?`,
+      )
+      .all(pattern, pattern, pattern, ...scopeArg, perRouteK) as Array<{
+      id: number
+      timestamp_ms: number
+      thumb_path: string | null
+      caption: string | null
+      asset_id: number
+      title: string
+    }>
+    for (const f of frames) {
+      hits.push({
+        type: 'frame',
+        id: f.id,
+        score: 0.5,
+        source: 'keyword',
+        assetId: f.asset_id,
+        assetTitle: f.title,
+        timestampMs: f.timestamp_ms,
+        thumbPath: f.thumb_path,
+        caption: f.caption,
+      })
+    }
+  }
+
+  if (pattern && (modality === 'all' || modality === 'image')) {
+    const images = db
+      .prepare(
+        `SELECT im.id, im.file_path, im.caption, a.id AS asset_id, a.title
+         FROM images im JOIN assets a ON a.id = im.asset_id
+         WHERE (a.title LIKE ? ESCAPE '\\' OR COALESCE(im.caption, '') LIKE ? ESCAPE '\\'
+                OR a.tags_json LIKE ? ESCAPE '\\') ${scope}
+         ORDER BY im.id DESC LIMIT ?`,
+      )
+      .all(pattern, pattern, pattern, ...scopeArg, perRouteK) as Array<{
+      id: number
+      file_path: string
+      caption: string | null
+      asset_id: number
+      title: string
+    }>
+    for (const im of images) {
+      hits.push({
+        type: 'image',
+        id: im.id,
+        score: 0.5,
+        source: 'keyword',
+        assetId: im.asset_id,
+        assetTitle: im.title,
+        filePath: im.file_path,
+        caption: im.caption,
+      })
+    }
+  }
+
   const best = new Map<string, SearchHit>()
   for (const h of hits) {
     const key = `${h.type}:${h.id}:${h.source}`

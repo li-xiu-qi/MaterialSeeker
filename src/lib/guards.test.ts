@@ -39,7 +39,7 @@ function scan(pattern: RegExp, opts: { skipTests?: boolean } = {}): Found[] {
     const lines = readFileSync(file, 'utf8').split('\n')
     lines.forEach((text, i) => {
       if (pattern.test(text)) {
-        hits.push({ file: relative(SRC, file), line: i + 1, text: text.trim() })
+        hits.push({ file: relative(SRC, file).replace(/\\/g, '/'), line: i + 1, text: text.trim() })
       }
     })
   }
@@ -185,7 +185,9 @@ describe('禁则：正文里的下拉框必须滚轮友好', () => {
     const users: string[] = []
     for (const file of walk(SRC)) {
       if (file.includes('.test.')) continue
-      if (readFileSync(file, 'utf8').includes('<ScrollSafeSelect')) users.push(relative(SRC, file))
+      if (readFileSync(file, 'utf8').includes('<ScrollSafeSelect')) {
+        users.push(relative(SRC, file).replace(/\\/g, '/'))
+      }
     }
     expect(users.sort()).toEqual(['app/(app)/library/page.tsx', 'components/CollectionScope.tsx'])
   })
@@ -329,5 +331,50 @@ describe('素材库类型筛选生效', () => {
     const page = readFileSync(join(SRC, 'app/(app)/library/page.tsx'), 'utf8')
     expect(page).toContain('getLibraryList(collectionId')
     expect(page).toMatch(/getLibraryList\(collectionId,\s*\{[^}]*kind/)
+  })
+})
+
+describe('视频页的逐字稿不撑破播放器边界', () => {
+  const code = readFileSync(join(SRC, 'components/VideoTranscriptPanel.tsx'), 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*\*(\s|$)/.test(l) && !/^\s*\/\//.test(l))
+    .join('\n')
+
+  it('桌面逐字稿跟随网格行高，不再按视口高度撑开', () => {
+    expect(code).toContain("kind === 'video' ? 'xl:relative' : ''")
+    expect(code).toContain("kind === 'video' ? 'xl:absolute xl:inset-0' : ''")
+    expect(code).toContain("kind === 'video' ? 'xl:max-h-none' : ''")
+    expect(code).not.toContain('70vh')
+  })
+
+  it('列表在剩余空间滚动，窄屏也有明确上限', () => {
+    expect(code).toContain('min-h-0 flex-1')
+    expect(code).toContain('max-h-80')
+  })
+})
+
+describe('关键帧只在用户点击后分批加载', () => {
+  const code = readFileSync(join(SRC, 'components/KeyframeGrid.tsx'), 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*\*(\s|$)/.test(l) && !/^\s*\/\//.test(l))
+    .join('\n')
+
+  it('默认显示 4 个，提供每次补 4 个的显示更多按钮', () => {
+    expect(code).toContain('useState(4)')
+    expect(code).toContain('frames.slice(0, count)')
+    expect(code).toContain('type="button"')
+    expect(code).toContain('current + 4')
+    expect(code).toContain('显示更多')
+  })
+
+  it('页面滚动不再追加关键帧', () => {
+    expect(code).not.toContain("addEventListener('scroll'")
+    expect(code).not.toContain('向下滚动继续加载')
+  })
+
+  it('预览区比例统一，完整显示图片且不重复空描述', () => {
+    expect(code).toContain('aspect-[4/3]')
+    expect(code).toContain('object-contain')
+    expect(code).not.toContain('（无描述）')
   })
 })

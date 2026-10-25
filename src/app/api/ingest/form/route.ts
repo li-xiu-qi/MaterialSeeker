@@ -102,6 +102,7 @@ export async function POST(req: Request) {
   }
 
   const collectionId = normalizeCollectionId(form.get('collectionId') as string | null)
+  const subtitlePath = (form.get('subtitlePath') as string | null)?.trim() || undefined
   let imgs = 0
   let vids = 0
   let auds = 0
@@ -139,7 +140,7 @@ export async function POST(req: Request) {
         await ingestImage(safeName, target, undefined, collectionId)
         imgs += 1
       } else if (kind === 'video') {
-        await ingestVideo({ videoPath: target, title: safeName, collectionId })
+        await ingestVideo({ videoPath: target, title: safeName, collectionId, subtitlePath })
         vids += 1
       } else {
         await ingestAudio({ audioPath: target, title: safeName, collectionId })

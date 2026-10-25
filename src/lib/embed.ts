@@ -1,4 +1,4 @@
-import { VECTOR_DIM } from '../lib/db'
+import { VECTOR_DIM } from './db'
 
 /**
  * 推理服务客户端。编码全部走本地 GPU 上的 Python 推理服务，
@@ -9,6 +9,22 @@ import { VECTOR_DIM } from '../lib/db'
  */
 
 const BASE_URL = process.env.MATERIALSEEKER_INFERENCE_URL || 'http://127.0.0.1:8280'
+
+export type DeploymentProfile = 'light' | 'standard'
+
+/**
+ * 部署档位。轻量版保留 ASR、图片/帧描述与关键词检索，只关闭向量编码；
+ * 标准版在此基础上启用向量语义增强。未配置时沿用原有标准行为。
+ */
+export function deploymentProfile(): DeploymentProfile {
+  const raw = (process.env.MATERIALSEEKER_PROFILE || 'standard').trim().toLowerCase()
+  if (raw === 'light' || raw === 'standard') return raw
+  throw new Error(`unknown MATERIALSEEKER_PROFILE: ${raw}; expected light or standard`)
+}
+
+export function embeddingEnabled(): boolean {
+  return deploymentProfile() === 'standard'
+}
 
 /** 索引侧（passage）：被检索的内容。EG2 的 Document task prefix。 */
 export const PASSAGE_INSTRUCTION = 'title: none | text: '
@@ -35,6 +51,9 @@ export interface Embedding {
  * 静默降级会让检索结果缺一路而不被察觉，这里显式抛。
  */
 export async function encodeBatch(req: EncodeRequest): Promise<Float32Array[]> {
+  if (!embeddingEnabled()) {
+    throw new Error('embedding is disabled in light mode')
+  }
   const res = await fetch(`${BASE_URL}/encode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

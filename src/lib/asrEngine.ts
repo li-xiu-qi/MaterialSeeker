@@ -14,5 +14,6 @@
 /** 推理仓回报的 asr_provider 值 → 引擎标识 */
 export function asrEngineLabel(provider?: string): string {
   if (provider === 'siliconflow') return 'xingchen-asr-v3.2'
+  if (provider === 'subtitle') return 'srt-subtitle'
   return 'funasr-paraformer-zh'
 }

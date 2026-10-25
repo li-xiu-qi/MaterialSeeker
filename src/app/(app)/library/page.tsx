@@ -10,6 +10,7 @@ import { ASSET_KINDS } from '@/lib/mediaKind'
 import { fmtMs } from '@/lib/format'
 import { ScrollSafeSelect } from '@/components/ScrollSafeSelect'
 import Link from 'next/link'
+import { embeddingEnabled } from '@/lib/embed'
 
 /**
  * 类型筛选。**与检索页同源**：ASSET_KINDS 派生，不手写四种模态。
@@ -136,12 +137,12 @@ function BulkBar({
   caption?: boolean
 }) {
   const btn =
-    'rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
+    'rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
   if (!selecting) {
     return (
       <Link
         href={enterHref}
-        className="rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+        className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
       >
         多选
       </Link>
@@ -155,7 +156,7 @@ function BulkBar({
         form={formId}
         defaultValue=""
         aria-label="目标素材库"
-        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[11px] text-neutral-300 outline-none focus:border-neutral-500"
+        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-xs text-neutral-300 outline-none focus:border-neutral-500"
       >
         <option value="">选择目标库</option>
         {targets.map((t) => (
@@ -192,14 +193,14 @@ function BulkBar({
         form={formId}
         formAction="/api/library/bulk/form"
         formMethod="post"
-        className="rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-red-700 hover:text-red-300"
+        className="rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-400 hover:border-red-700 hover:text-red-300"
       >
         删除所选
       </button>
       <Link href={exitHref} className={btn}>
         退出多选
       </Link>
-      <span className="text-[11px] text-neutral-700">
+      <span className="text-xs text-neutral-400">
         {wide ? '勾选左侧方框' : '勾选卡片左上角'}
       </span>
     </div>
@@ -277,6 +278,7 @@ export default async function LibraryPage({
     select,
   } = await searchParams
   const collectionId = normalizeCollectionId(lib)
+  const lightMode = !embeddingEnabled()
   // n 由用户经 URL 给，钳在 [PAGE, MAX_PAGE]：小于一页没有意义（会漏看），
   // 大于上限是手打参数，服务端还会再钳一次，两边同一个常数。
   const shown = Math.max(PAGE, Math.min(Number(n) || PAGE, MAX_PAGE))
@@ -341,12 +343,12 @@ export default async function LibraryPage({
         {data.allCollections ? ' · 每条素材标注了所属库' : ''}
       </p>
 
-      {cerr && <p className="mt-2 text-[11px] text-red-400">{cerr}</p>}
+      {cerr && <p className="mt-2 text-xs text-red-400">{cerr}</p>}
       {deletedName && (
-        <p className="mt-2 text-[11px] text-emerald-400">已删除素材库「{deletedName}」</p>
+        <p className="mt-2 text-xs text-emerald-400">已删除素材库「{deletedName}」</p>
       )}
       {bulkRemoved && (
-        <p className="mt-2 text-[11px] text-emerald-400">
+        <p className="mt-2 text-xs text-emerald-400">
           已删除 {bulkRemoved} 条素材（文件仍保留在素材目录）
         </p>
       )}
@@ -381,14 +383,14 @@ export default async function LibraryPage({
         />
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-500">
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
         {ASSET_KINDS.map((k) => (
           <span key={k.kind}>
             {k.label} {data.counts[k.kind]}
           </span>
         ))}
         <span className="ml-auto flex items-center gap-1.5">
-          <span className="text-neutral-600">栏数</span>
+          <span className="text-neutral-400">栏数</span>
           {COL_OPTIONS.map((o) => {
             const active = cols === Number(o.value)
             const href = new URLSearchParams(keepForCols)
@@ -397,7 +399,7 @@ export default async function LibraryPage({
               <Link
                 key={o.value}
                 href={withSelect(`/library?${href.toString()}`)}
-                className={`rounded border px-2 py-0.5 text-[11px] transition ${
+                className={`rounded border px-2 py-0.5 text-xs transition ${
                   active
                     ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
                     : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
@@ -409,7 +411,7 @@ export default async function LibraryPage({
           })}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="text-neutral-600">类型</span>
+          <span className="text-neutral-400">类型</span>
           {FILTERS.map((f) => {
             const active = (kind ?? 'all') === f.value
             return (
@@ -418,7 +420,7 @@ export default async function LibraryPage({
                 href={withSelect(
                   `/library?lib=${libQ}&k=${f.value}&kw=${encodeURIComponent(keyword)}`,
                 )}
-                className={`rounded border px-2 py-0.5 text-[11px] transition ${
+                className={`rounded border px-2 py-0.5 text-xs transition ${
                   active
                     ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
                     : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
@@ -443,14 +445,14 @@ export default async function LibraryPage({
         />
         <button
           type="submit"
-          className="rounded-md border border-neutral-700 px-3 py-1.5 text-[11px] text-neutral-300 hover:border-neutral-500"
+          className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-500"
         >
           筛选
         </button>
         {keyword && (
           <Link
             href={`/library?lib=${libQ}&k=${kind ?? 'all'}`}
-            className="self-center text-[11px] text-neutral-600 underline hover:text-neutral-300"
+            className="self-center text-xs text-neutral-400 underline hover:text-neutral-300"
           >
             清除
           </Link>
@@ -473,7 +475,7 @@ export default async function LibraryPage({
           )}
         </div>
         {data.video.length === 0 ? (
-          <p className="mt-3 text-xs text-neutral-700">
+          <p className="mt-3 text-xs text-neutral-400">
             {kind && kind !== 'video'
               ? '已被类型筛选排除'
               : keyword
@@ -576,7 +578,7 @@ export default async function LibraryPage({
                           高度失控（实测 354px）。多栏时只留最有信息量的一句，要看
                           全的去详情页。
                         */}
-                        <span className="mt-1 block text-[11px] text-neutral-600">
+                        <span className="mt-1 block text-xs text-neutral-400">
                           {wide ? (
                             `${v.sentences} 句 · ${v.chunks} 块 · ${v.frames} 帧 · 查看逐字稿与关键帧`
                           ) : (
@@ -629,7 +631,7 @@ export default async function LibraryPage({
           )}
         </div>
         {data.image.length === 0 ? (
-          <p className="mt-3 text-xs text-neutral-700">
+          <p className="mt-3 text-xs text-neutral-400">
             {kind && kind !== 'image'
               ? '已被类型筛选排除'
               : keyword
@@ -735,15 +737,15 @@ export default async function LibraryPage({
                         <span
                           className={
                             wide
-                              ? 'mt-1 block text-[11px] text-neutral-400'
-                              : 'mt-0.5 block text-[11px] leading-4 text-neutral-400 line-clamp-2'
+                              ? 'mt-1 block text-xs text-neutral-400'
+                              : 'mt-0.5 block text-xs leading-4 text-neutral-400 line-clamp-2'
                           }
                         >
                           {im.caption ?? '（无说明）'}
                         </span>
-                        <span className="mt-1 block text-[11px] text-neutral-600">
-                          {im.hasVector ? '可搜索' : '暂不可搜索'}
-                          {im.hasCaptionVector && wide ? ' · 可按描述搜索' : ''}
+                        <span className="mt-1 block text-xs text-neutral-400">
+                          {lightMode ? '关键词可检索' : im.hasVector ? '可搜索' : '暂不可搜索'}
+                          {!lightMode && im.hasCaptionVector && wide ? ' · 可按描述搜索' : ''}
                           {!wide && ' · 查看大图与相似素材'}
                         </span>
                       </span>
@@ -802,7 +804,7 @@ export default async function LibraryPage({
           )}
         </div>
         {data.audio.length === 0 ? (
-          <p className="mt-3 text-xs text-neutral-700">
+          <p className="mt-3 text-xs text-neutral-400">
             {kind && kind !== 'audio'
               ? '已被类型筛选排除'
               : keyword
@@ -833,14 +835,14 @@ export default async function LibraryPage({
                     <div className="min-w-0 flex-1">
                       <Link href={`/library/audio/${au.id}`} className="block min-w-0">
                         <p className="truncate text-sm text-neutral-200">{au.title}</p>
-                        <p className="mt-1 text-[11px] text-neutral-600">
+                        <p className="mt-1 text-xs text-neutral-400">
                           {fmtMs(au.durationMs)} · {au.sentences} 句 · {au.chunks} 块
                         </p>
                       </Link>
                       {!wide && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {au.tags.length === 0 ? (
-                            <span className="text-[11px] text-neutral-700">（无标签）</span>
+                            <span className="text-xs text-neutral-400">（无标签）</span>
                           ) : (
                             au.tags.map((t) => (
                               <span
@@ -861,7 +863,7 @@ export default async function LibraryPage({
                         字段，给了描述框用户填完保存会被服务端拒掉，而拒绝的理由
                         （「视频/音频没有整片描述可改」）对用户是不可操作的信息。
                       */}
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
                         <LibraryEditButton
                           id={au.id}
                           kind="audio"
@@ -914,7 +916,7 @@ export default async function LibraryPage({
           )}
         </div>
         {data.text.length === 0 ? (
-          <p className="mt-3 text-xs text-neutral-700">
+          <p className="mt-3 text-xs text-neutral-400">
             {kind && kind !== 'text'
               ? '已被类型筛选排除'
               : keyword
@@ -944,8 +946,8 @@ export default async function LibraryPage({
                       <p className={wide ? 'truncate text-sm text-neutral-200' : 'text-sm leading-5 text-neutral-200 line-clamp-2'}>
                         {t.title}
                       </p>
-                      <p className="mt-1 text-[11px] text-neutral-600">
-                        {t.chars} 字 · {t.hasVector ? '可搜索' : '暂不可搜索'}
+                      <p className="mt-1 text-xs text-neutral-400">
+                        {t.chars} 字 · {lightMode ? '关键词可检索' : t.hasVector ? '可搜索' : '暂不可搜索'}
                         {wide ? ' · 查看与编辑' : ''}
                       </p>
                     </Link>
@@ -975,15 +977,15 @@ export default async function LibraryPage({
       </section>
 
       {moved !== null && (
-        <p className="mt-6 text-[11px] text-emerald-400">已移动 {moved} 条素材</p>
+        <p className="mt-6 text-xs text-emerald-400">已移动 {moved} 条素材</p>
       )}
       {copied !== null && (
-        <p className="mt-6 text-[11px] text-emerald-400">
+        <p className="mt-6 text-xs text-emerald-400">
           已复制 {copied} 条素材（文件已在素材目录中复制一份）
         </p>
       )}
 
-      <p className="mt-8 text-[11px] leading-5 text-neutral-700">
+      <p className="mt-8 text-xs leading-5 text-neutral-400">
         删除只是把素材移出素材库，文件仍留在素材目录，需要清理请自行处理。
       </p>
     </div>

@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "tsc --noEmit && vitest run"
+    "test:light": "bash scripts/test-light-mode.sh",
+    "test:fts": "bash scripts/test-fts-segment.sh",
+    "check": "tsc --noEmit && vitest run && npm run test:light && npm run test:fts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

@@ -1,6 +1,6 @@
 import { getDb } from './db'
 import { PATHS } from './paths'
-import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
+import { encodeBatch, embeddingEnabled, PASSAGE_INSTRUCTION } from './embed'
 import { embeddingToBlob } from './db'
 import { parseTags, serializeTags, composeCaptionText } from './tags'
 
@@ -197,7 +197,7 @@ export async function applyAnalysis(
   // 里消失，而标签本来是填来被搜的。
   const nextCaption = a.description || (cur.caption ?? '')
   const text = composeCaptionText(nextCaption, tags)
-  const vec = text
+  const vec = text && embeddingEnabled()
     ? (
         await encodeBatch({
           inputs: [{ modality: 'text', text, instruction: PASSAGE_INSTRUCTION }],

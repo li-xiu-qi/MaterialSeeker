@@ -2,7 +2,7 @@ import { getDb, embeddingToBlob } from './db'
 import type { Database } from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
-import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
+import { encodeBatch, embeddingEnabled, PASSAGE_INSTRUCTION } from './embed'
 import { composeCaptionText, parseTags, serializeTags } from './tags'
 
 /**
@@ -455,7 +455,7 @@ export async function updateAssetMeta(
         // 而这个故障没有任何提示，只会被当成「检索模型不行」。
         const text = composeCaptionText(nextCaption, curTags)
         // 空语料也要清掉向量：留着旧向量会让这条素材继续被旧语料命中
-        const vec = text
+        const vec = text && embeddingEnabled()
           ? (await encodeBatch({ inputs: [{ modality: 'text', text, instruction: PASSAGE_INSTRUCTION }] }))[0]
           : null
         db.prepare('UPDATE images SET caption = ?, caption_embedding = ? WHERE asset_id = ?').run(
@@ -472,20 +472,22 @@ export async function updateAssetMeta(
       if (!cur) throw new Error('文本记录缺失')
       if (cur.content !== nextCaption) {
         if (!nextCaption) throw new Error('正文不能为空')
-        const vec = (
-          await encodeBatch({
-            inputs: [
-              {
-                modality: 'text',
-                text: composeCaptionText(nextCaption, curTags),
-                instruction: PASSAGE_INSTRUCTION,
-              },
-            ],
-          })
-        )[0]
+        const vec = embeddingEnabled()
+          ? (
+              await encodeBatch({
+                inputs: [
+                  {
+                    modality: 'text',
+                    text: composeCaptionText(nextCaption, curTags),
+                    instruction: PASSAGE_INSTRUCTION,
+                  },
+                ],
+              })
+            )[0]
+          : null
         db.prepare('UPDATE text_notes SET content = ?, embedding = ? WHERE asset_id = ?').run(
           nextCaption,
-          embeddingToBlob(vec),
+          vec ? embeddingToBlob(vec) : null,
           id,
         )
         captionChanged = true
@@ -501,7 +503,7 @@ export async function updateAssetMeta(
         | undefined
       if (!cur) throw new Error('图片记录缺失')
       const text = composeCaptionText(cur.caption, nextTags)
-      const vec = text
+      const vec = text && embeddingEnabled()
         ? (await encodeBatch({ inputs: [{ modality: 'text', text, instruction: PASSAGE_INSTRUCTION }] }))[0]
         : null
       db.prepare('UPDATE images SET caption_embedding = ? WHERE asset_id = ?').run(
@@ -513,12 +515,17 @@ export async function updateAssetMeta(
         | { content: string }
         | undefined
       if (!cur) throw new Error('文本记录缺失')
-      const vec = await encodeBatch({
-        inputs: [
-          { modality: 'text', text: composeCaptionText(cur.content, nextTags), instruction: PASSAGE_INSTRUCTION },
-        ],
-      })
-      db.prepare('UPDATE text_notes SET embedding = ? WHERE asset_id = ?').run(embeddingToBlob(vec[0]), id)
+      const vec = embeddingEnabled()
+        ? await encodeBatch({
+            inputs: [
+              { modality: 'text', text: composeCaptionText(cur.content, nextTags), instruction: PASSAGE_INSTRUCTION },
+            ],
+          })
+        : []
+      db.prepare('UPDATE text_notes SET embedding = ? WHERE asset_id = ?').run(
+        vec[0] ? embeddingToBlob(vec[0]) : null,
+        id,
+      )
     }
   }
 

@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import { getDb, embeddingToBlob } from './db'
 import { PATHS } from './paths'
-import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
+import { encodeBatch, embeddingEnabled, PASSAGE_INSTRUCTION } from './embed'
 import { chunkGreedy } from './chunking'
 import { DEFAULT_COLLECTION_ID } from './collections'
 import { generateThumbs } from './thumbs'
@@ -26,15 +26,18 @@ export async function ingestText(
   const sentences = [{ start_ms: 0, end_ms: 0, text: content }]
   const chunks = chunkGreedy(sentences)
 
-  // 批量编码，一次请求发完，避免每块一轮网络往返
-  const vectors = await encodeBatch({
-    inputs: chunks.map((c) => ({
-      modality: 'text' as const,
-      text: c.text,
-      instruction: PASSAGE_INSTRUCTION,
-    })),
-  })
-  if (vectors.length !== chunks.length) {
+  // 标准版批量编码；轻量版跳过模型调用，FTS 仍由数据库触发器维护。
+  const useEmbedding = embeddingEnabled()
+  const vectors = useEmbedding
+    ? await encodeBatch({
+        inputs: chunks.map((c) => ({
+          modality: 'text' as const,
+          text: c.text,
+          instruction: PASSAGE_INSTRUCTION,
+        })),
+      })
+    : []
+  if (useEmbedding && vectors.length !== chunks.length) {
     throw new Error(`encode mismatch: ${vectors.length} vectors for ${chunks.length} chunks`)
   }
 
@@ -52,7 +55,7 @@ export async function ingestText(
 
   const insertNote = db
     .prepare('INSERT INTO text_notes (asset_id, content, embedding) VALUES (?, ?, ?)')
-    .run(assetId, content, embeddingToBlob(vectors[0]))
+    .run(assetId, content, vectors[0] ? embeddingToBlob(vectors[0]) : null)
 
   const insertChunk = db.prepare(
     `INSERT INTO chunks (transcript_id, chunk_index, start_ms, end_ms, text, chunk_strategy, embedding)
@@ -71,7 +74,7 @@ export async function ingestText(
         c.end_ms,
         c.text,
         c.strategy,
-        embeddingToBlob(vectors[i]),
+        vectors[i] ? embeddingToBlob(vectors[i]) : null,
       )
       const chunkId = Number(r.lastInsertRowid)
       for (const s of c.sentences) {
@@ -114,9 +117,10 @@ export async function ingestImage(
   if (captionText) {
     inputs.push({ modality: 'text', text: captionText, instruction: PASSAGE_INSTRUCTION })
   }
-  const vectors = await encodeBatch({ inputs })
-  const imgVec = vectors[0]
-  const capVec = captionText ? vectors[1] : null
+  const useEmbedding = embeddingEnabled()
+  const vectors = useEmbedding ? await encodeBatch({ inputs }) : []
+  const imgVec = useEmbedding ? vectors[0] : null
+  const capVec = useEmbedding && captionText ? vectors[1] : null
 
   const insertAsset = db
     .prepare(
@@ -138,7 +142,7 @@ export async function ingestImage(
     assetId,
     filePath,
     caption ?? null,
-    embeddingToBlob(imgVec),
+    imgVec ? embeddingToBlob(imgVec) : null,
     capVec ? embeddingToBlob(capVec) : null,
   )
 

@@ -1,7 +1,7 @@
 import { getDb, embeddingToBlob } from './db'
 import { DEFAULT_COLLECTION_ID } from './collections'
 import { PATHS } from './paths'
-import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
+import { encodeBatch, embeddingEnabled, PASSAGE_INSTRUCTION } from './embed'
 import { chunkGreedy, type Sentence } from './chunking'
 import { clearServiceProgress, pollServiceProgress } from './serviceProgress'
 import { asrEngineLabel } from './asrEngine'
@@ -61,6 +61,7 @@ export interface AudioIngestResult {
 
 export async function ingestAudio(opts: AudioIngestOptions): Promise<AudioIngestResult> {
   const db = getDb()
+  const useEmbedding = embeddingEnabled()
   const {
     collectionId = DEFAULT_COLLECTION_ID,
     audioPath,
@@ -137,10 +138,10 @@ export async function ingestAudio(opts: AudioIngestOptions): Promise<AudioIngest
     // --- 3. 分块 + 编码 ---
     // greedy 而不是 scene：音频没有画面，场景边界无从算起；固定窗口会把一句话
     // 从中间切断，命中后定位到半句比不命中更糟。
-    stage('text-encode')
+    if (useEmbedding) stage('text-encode')
     const chunks = chunkGreedy(sentences)
     let encoded: Float32Array[] = []
-    if (chunks.length > 0) {
+    if (chunks.length > 0 && useEmbedding) {
       encoded = await encodeBatch({
         inputs: chunks.map((c) => ({
           modality: 'text' as const,

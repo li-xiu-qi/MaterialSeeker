@@ -71,16 +71,16 @@ export function ChunkResultCard({
           <p className="mt-1 text-sm text-neutral-300">{chunkText}</p>
 
           <div className="mt-2 flex items-center gap-2">
-            <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[11px] tabular-nums text-neutral-300">
+            <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-xs tabular-nums text-neutral-300">
               {fmtMs(startMs)} - {fmtMs(endMs)}
             </span>
-            <span className="text-[11px] text-neutral-600">{sentences.length} 句</span>
+            <span className="text-xs text-neutral-400">{sentences.length} 句</span>
             {seekHref && (
               <a
                 href={seekHref}
-                className="ml-auto rounded border border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-300 hover:border-neutral-500"
+                className="ml-auto rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-300 hover:border-neutral-500"
               >
-                定位播放
+                {videoUrl ? '定位播放' : '查看笔记'}
               </a>
             )}
           </div>
@@ -91,12 +91,12 @@ export function ChunkResultCard({
       {sentences.length > 1 && (
         <ul className="mt-2 space-y-0.5 border-t border-neutral-800 pt-2">
           {sentences.map((s, i) => (
-            <li key={i} className="flex gap-2 text-[11px] text-neutral-500">
+            <li key={i} className="flex gap-2 text-xs text-neutral-400">
               <span className="tabular-nums">{fmtMs(s.start_ms)}</span>
               <span className="min-w-0 flex-1">{s.text}</span>
               <a
                 href={s.seekHref}
-                className="flex-none text-neutral-700 hover:text-neutral-300"
+                className="flex-none text-neutral-400 hover:text-neutral-300"
               >
                 播放
               </a>
@@ -106,7 +106,7 @@ export function ChunkResultCard({
       )}
 
       {!videoUrl && (
-        <p className="mt-2 text-[11px] text-neutral-600">文本笔记，无对应视频文件</p>
+        <p className="mt-2 text-xs text-neutral-400">文本笔记，无对应视频文件</p>
       )}
     </div>
   )

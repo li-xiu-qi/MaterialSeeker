@@ -1,7 +1,7 @@
 import { getDb, embeddingToBlob } from './db'
 import { DEFAULT_COLLECTION_ID } from './collections'
 import { PATHS } from './paths'
-import { encodeBatch, PASSAGE_INSTRUCTION } from './embed'
+import { encodeBatch, embeddingEnabled, PASSAGE_INSTRUCTION } from './embed'
 import { chunkByScene, chunkFixed, chunkGreedy, type Sentence } from './chunking'
 import { clearServiceProgress, pollServiceProgress } from './serviceProgress'
 import { generateThumbs } from './thumbs'
@@ -63,6 +63,8 @@ export interface VideoIngestOptions {
   sceneThreshold?: number
   minSceneDuration?: number
   maxScenes?: number
+  /** 已有 SRT 字幕时直接复用，不再重复跑 ASR。 */
+  subtitlePath?: string
   /** 阶段回调。runner 用它把进度写进 job 行 */
   onStage?: StageCallback
 }
@@ -74,7 +76,7 @@ export interface VideoIngestResult {
   sentenceCount: number
   frameCount: number
   strategy: string
-  /** 帧描述：实际拿到文本并编码的帧数（开关关闭或整段熔断时为 0） */
+  /** 帧描述：实际拿到文本的帧数（开关关闭或整段熔断时为 0） */
   captionCount: number
   /** 帧描述：失败的帧数。连续失败触发的熔断不在这里逐帧累计 */
   captionFailedCount: number
@@ -94,6 +96,7 @@ const FRAME_CAPTION_FAIL_STREAK = 3
 
 export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngestResult> {
   const db = getDb()
+  const useEmbedding = embeddingEnabled()
   const {
     collectionId = DEFAULT_COLLECTION_ID,
     videoPath,
@@ -102,6 +105,7 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
     sceneThreshold,
     minSceneDuration,
     maxScenes,
+    subtitlePath,
     onStage,
   } = opts
 
@@ -121,6 +125,7 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
       min_scene_duration: minSceneDuration,
       max_scenes: maxScenes,
       frames_out_dir: PATHS.framesDir,
+      subtitle_path: subtitlePath,
       job_id: serviceJobId,
     }),
   })
@@ -139,6 +144,8 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
       scenes: Array<{ start_ms: number; end_ms: number }>
       frames: Array<{ scene_index: number; timestamp_ms: number; path: string }>
       sentences: Array<{ sentence: string; start_ms: number; end_ms: number; spk_id: string | null }>
+      /** 视频流的真实时长。旧版推理服务没有这个字段时保持未知。 */
+      duration_ms?: number
       // 推理仓回报实际生效的 ASR 路径（云端失败回退本地时报 local）。
       // 旧版本不返回该字段，用 ?? 兜住，别让一次接口升级把入库整个打断。
       asr_provider?: string
@@ -152,14 +159,18 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
     const sceneBounds = [0, ...data.scenes.map((s) => s.end_ms)]
 
     // --- 2. asset + transcript + sentences ---
+    // 只保存视频流的真实时长；旧推理服务没有该字段时保持未知，
+    // 不把末句时间误标成视频时长。
+    const durationMs = data.duration_ms && data.duration_ms > 0 ? data.duration_ms : null
     const asset = db
       .prepare(
-        'INSERT INTO assets (kind, title, source_path, meta_json, collection_id) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO assets (kind, title, source_path, duration_ms, meta_json, collection_id) VALUES (?, ?, ?, ?, ?, ?)',
       )
       .run(
         'video',
         title,
         videoPath,
+        durationMs,
         JSON.stringify({
           scene_count: data.scenes.length,
           sentence_count: sentences.length,
@@ -177,7 +188,7 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
     const transcriptId = Number(tr.lastInsertRowid)
 
     // --- 3. 分块 + 编码 ---
-    stage('text-encode')
+    if (useEmbedding) stage('text-encode')
     const chunks =
       strategy === 'scene'
         ? chunkByScene(sentences, sceneBounds)
@@ -186,7 +197,7 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
           : chunkGreedy(sentences)
 
     let encoded: Float32Array[] = []
-    if (chunks.length > 0) {
+    if (chunks.length > 0 && useEmbedding) {
       encoded = await encodeBatch({
         inputs: chunks.map((c) => ({
           modality: 'text' as const,
@@ -243,10 +254,11 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
     // --- 4. 帧编码 ---
     // 单独一轮，因为图片编码一次前向只能发一类，混在文本批里会退化成逐张往返。
     // 分批发是为了能报进度：几十张帧一次前向要好几分钟，期间进度条完全不动。
-    let frameCount = 0
-    if (data.frames.length > 0) {
+    const frameCount = data.frames.length
+    if (data.frames.length > 0 && useEmbedding) {
       stage('frame-encode', { done: 0, total: data.frames.length })
       const vecs: Float32Array[] = new Array(data.frames.length)
+      let encodedDone = 0
       for (let i = 0; i < data.frames.length; i += FRAME_ENCODE_BATCH) {
         const slice = data.frames.slice(i, i + FRAME_ENCODE_BATCH)
         const batchVecs = await encodeBatch({
@@ -255,8 +267,8 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
         batchVecs.forEach((v, j) => {
           vecs[i + j] = v
         })
-        frameCount += slice.length
-        stage('frame-encode', { done: frameCount, total: data.frames.length })
+        encodedDone += slice.length
+        stage('frame-encode', { done: encodedDone, total: data.frames.length })
       }
 
       const updateFrame = db.prepare(
@@ -308,13 +320,16 @@ export async function ingestVideo(opts: VideoIngestOptions): Promise<VideoIngest
         if (c) okIdx.push(i)
       })
       if (okIdx.length > 0) {
-        const vecs = await encodeBatch({
-          inputs: okIdx.map((i) => ({
-            modality: 'text' as const,
-            text: captions[i] as string,
-            instruction: PASSAGE_INSTRUCTION,
-          })),
-        })
+        // 轻量版也写 caption 文本，供关键词检索；只有标准版再生成对应向量。
+        const vecs = useEmbedding
+          ? await encodeBatch({
+              inputs: okIdx.map((i) => ({
+                modality: 'text' as const,
+                text: captions[i] as string,
+                instruction: PASSAGE_INSTRUCTION,
+              })),
+            })
+          : []
         const updateCaption = db.prepare(
           'UPDATE frames SET caption = ?, caption_embedding = ? WHERE asset_id = ? AND scene_index = ?',
         )

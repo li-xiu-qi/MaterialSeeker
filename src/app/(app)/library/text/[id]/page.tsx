@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getTextDetail } from '@/lib/library'
+import { embeddingEnabled } from '@/lib/embed'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,21 +29,22 @@ export default async function TextDetailPage({
   if (!detail) notFound()
 
   const { asset } = detail
+  const lightMode = !embeddingEnabled()
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link href="/library" className="text-xs text-neutral-500 underline hover:text-neutral-300">
+      <Link href="/library" className="text-xs text-neutral-400 underline hover:text-neutral-300">
         返回素材库
       </Link>
 
       <h1 className="mt-3 text-2xl font-semibold">{asset.title}</h1>
-      <p className="mt-1 text-[11px] text-neutral-600">
-        入库于 {asset.createdAt} · {asset.chars} 字 · {asset.hasVector ? '可检索' : '暂不可检索'}
+      <p className="mt-1 text-xs text-neutral-400">
+        入库于 {asset.createdAt} · {asset.chars} 字 · {lightMode ? '关键词可检索' : asset.hasVector ? '可检索' : '暂不可检索'}
       </p>
 
-      {cerr && <p className="mt-3 text-[11px] text-red-400">{cerr}</p>}
+      {cerr && <p className="mt-3 text-xs text-red-400">{cerr}</p>}
       {edited && (
-        <p className="mt-3 text-[11px] text-emerald-400">已保存，检索用的特征已同步更新</p>
+        <p className="mt-3 text-xs text-emerald-400">已保存，检索用的特征已同步更新</p>
       )}
 
       {/*
@@ -53,7 +55,7 @@ export default async function TextDetailPage({
         等待，这里说明一下，别让人以为页面卡住。
       */}
       <details className="mt-6 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
-        <summary className="cursor-pointer text-[11px] text-neutral-400 marker:content-none hover:text-neutral-200">
+        <summary className="cursor-pointer text-xs text-neutral-400 marker:content-none hover:text-neutral-200">
           编辑这段文本
         </summary>
         <form
@@ -64,7 +66,7 @@ export default async function TextDetailPage({
           <input type="hidden" name="redirect" value={`/library/text/${asset.id}`} />
 
           <div>
-            <label htmlFor="t-title" className="block text-[11px] text-neutral-500">
+            <label htmlFor="t-title" className="block text-xs text-neutral-400">
               标题
             </label>
             <input
@@ -77,7 +79,7 @@ export default async function TextDetailPage({
           </div>
 
           <div>
-            <label htmlFor="t-content" className="block text-[11px] text-neutral-500">
+            <label htmlFor="t-content" className="block text-xs text-neutral-400">
               内容
             </label>
             <textarea
@@ -107,7 +109,7 @@ export default async function TextDetailPage({
 
       <Link
         href={`/?q=${encodeURIComponent(asset.content.slice(0, 200))}`}
-        className="mt-4 inline-block rounded-md border border-neutral-700 px-3 py-1.5 text-[11px] text-neutral-300 hover:border-neutral-500 hover:text-neutral-100"
+        className="mt-4 inline-block rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-500 hover:text-neutral-100"
       >
         以此为查询词再检索
       </Link>

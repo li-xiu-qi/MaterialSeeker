@@ -3,6 +3,7 @@ import { ASSET_KINDS } from '@/lib/mediaKind'
 import { RESULT_PAGE, MAX_RESULT_SHOWN, resultParams } from '@/lib/searchPaging'
 import Link from 'next/link'
 import { search } from '@/lib/search'
+import { embeddingEnabled } from '@/lib/embed'
 import {
   getRecentAssets,
   getLibraryCounts,
@@ -129,6 +130,7 @@ export default async function HomePage({
   const madeId = made ? Number(made) : null
   const madeName = madeId ? (all.find((c) => c.id === madeId)?.name ?? null) : null
   const query = q?.trim() ?? ''
+  const lightMode = !embeddingEnabled()
   // 类型筛选。m 参数后端一直支持，但此前没有任何 UI 能设置它，等于白做。
   const modality = (m === 'video' || m === 'image' || m === 'text' ? m : 'all') as
     | 'all'
@@ -228,7 +230,7 @@ export default async function HomePage({
   // 落地态它筛的是「最近入库」那一排，结果态筛的是结果流，同一个参数两处生效。
   const filterBar = (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] text-neutral-600">类型</span>
+      <span className="text-xs text-neutral-400">类型</span>
       {MODALITIES.map((mo) => {
         const params = new URLSearchParams()
         if (query) params.set('q', query)
@@ -242,7 +244,7 @@ export default async function HomePage({
           <Link
             key={mo.value}
             href={href}
-            className={`rounded border px-2 py-0.5 text-[11px] transition ${
+            className={`rounded border px-2 py-0.5 text-xs transition ${
               active
                 ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
                 : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
@@ -325,8 +327,13 @@ export default async function HomePage({
       <div className="flex flex-col">
         <div className="flex flex-col items-center px-4 pt-14">
           <h1 className="text-3xl font-semibold text-neutral-100">找点什么</h1>
-          <p className="mt-2 text-sm text-neutral-500">文字、画面、视频里的对白，一个框都能搜</p>
+          <p className="mt-2 text-sm text-neutral-400">文字、画面、视频里的对白，一个框都能搜</p>
           <div className="mt-6 flex w-full justify-center">{form(true)}</div>
+          {lightMode && (
+            <p className="mt-3 text-xs text-neutral-400">
+              轻量模式：语音转写与画面描述保留，当前按关键词检索
+            </p>
+          )}
           <div className="mt-4">
             <CollectionScope
               collections={collections}
@@ -336,10 +343,10 @@ export default async function HomePage({
               justMadeName={madeName}
             />
           </div>
-          {cerr && <p className="mt-6 text-[11px] text-red-400">新建素材库失败：{cerr}</p>}
+          {cerr && <p className="mt-6 text-xs text-red-400">新建素材库失败：{cerr}</p>}
 
           {empty && (
-            <p className="mt-6 text-xs text-neutral-600">
+            <p className="mt-6 text-xs text-neutral-400">
               {scopeLabel(collectionId)}还没有素材，
               <Link href="/ingest" className="underline hover:text-neutral-400">
                 先去入库
@@ -357,14 +364,14 @@ export default async function HomePage({
                   说清库里的总量。**不再显示「看到 N」**：只有 5 条且不分页，
                   「看到 5」是句废话；要传递的是「库里还有更多，去素材库看」。
                 */}
-                <span className="ml-2 text-[11px] font-normal text-neutral-600">
+                <span className="ml-2 text-xs font-normal text-neutral-400">
                   {total > 0 ? `库里共 ${total} 条` : ''}
                 </span>
               </h2>
               <div className="flex-none">{filterBar}</div>
               <Link
                 href="/library"
-                className="text-[11px] text-neutral-500 underline hover:text-neutral-300"
+                className="text-xs text-neutral-400 underline hover:text-neutral-300"
               >
                 去素材库看全部
               </Link>
@@ -412,12 +419,12 @@ export default async function HomePage({
                         className="aspect-[16/9] w-full rounded border border-neutral-800 bg-neutral-900 object-contain"
                       />
                     ) : (
-                      <div className="flex aspect-[16/9] items-center justify-center rounded border border-neutral-800 bg-neutral-900 text-[11px] text-neutral-700">
+                      <div className="flex aspect-[16/9] items-center justify-center rounded border border-neutral-800 bg-neutral-900 text-xs text-neutral-400">
                         {KIND_LABEL[r.kind]}
                       </div>
                     )}
-                    <p className="mt-1.5 truncate text-[11px] text-neutral-300">{r.title}</p>
-                    <p className="text-[10px] text-neutral-600">{KIND_LABEL[r.kind]}</p>
+                    <p className="mt-1.5 truncate text-xs text-neutral-300">{r.title}</p>
+                    <p className="text-[10px] text-neutral-400">{KIND_LABEL[r.kind]}</p>
                   </Link>
                 </li>
               ))}
@@ -442,12 +449,17 @@ export default async function HomePage({
       */}
       <h1 className="text-2xl font-semibold">
         搜索结果
-        <span className="ml-2 text-sm font-normal text-neutral-500">
+        <span className="ml-2 text-sm font-normal text-neutral-400">
           「{query}」· {hitCount} 条
         </span>
       </h1>
 
       {form(false)}
+      {lightMode && (
+        <p className="mt-2 text-xs text-neutral-400">
+          轻量模式：语音转写与画面描述保留，当前按关键词检索
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <CollectionScope
@@ -466,7 +478,7 @@ export default async function HomePage({
         </p>
       )}
 
-      {cerr && <p className="mt-4 text-[11px] text-red-400">新建素材库失败：{cerr}</p>}
+      {cerr && <p className="mt-4 text-xs text-red-400">新建素材库失败：{cerr}</p>}
 
       {!error && hitCount === 0 && (
         <p className="mt-6 text-sm text-neutral-400">

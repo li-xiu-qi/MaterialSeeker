@@ -42,7 +42,9 @@ cd ~/materialseeker && ./node_modules/.bin/next dev --port 9280
 
 ## 几条硬约束
 
-向量维度固定 1024，改维度要同时改 `db.ts` 的 `VECTOR_DIM`、`embed.ts` 的校验、推理仓（`../MaterialSeeker-inference/.env`）的 `MATERIALSEEKER_DIM` 三处。改一处不改另两处的结果是请求在边界上才炸。
+部署档位由 `MATERIALSEEKER_PROFILE` 控制：`light` 保留 ASR、图片/帧描述、关键词检索和素材管理，不请求向量服务；`standard` 在此基础上启用向量语义增强。未配置默认 `standard`。轻量新素材的向量字段为 NULL；切回标准后用 `POST /api/maintenance/backfill-embeddings` 显式回填，不自动执行。
+
+向量维度固定 768，改维度要同时改 `db.ts` 的 `VECTOR_DIM`、`embed.ts` 的校验、推理仓（`../MaterialSeeker-inference/.env`）的 `MATERIALSEEKER_DIM` 三处。改一处不改另两处的结果是请求在边界上才炸。
 
 instruction 不能省。索引端与查询端必须分别带 passage 与 query 指令，`embed.ts` 里两个常量集中管理，不要在各处散着写字符串。这两个常量与推理仓服务端的缺省值必须一致。
 
