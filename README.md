@@ -1,71 +1,118 @@
 # MaterialSeeker
 
-多模态内容检索工作台。把视频、图片、文本笔记变成一个可统一检索的库：视频转逐字稿按块检索并支持句级秒级跳转，图片与帧做多模态相似检索，文本做相似加关键词双路检索。
+多模态内容检索工作台。把视频、图片、音频和文本笔记变成一个可统一检索的库：语音转写支持逐字稿与句级定位，图片和视频帧可生成描述，检索按部署档位使用关键词或向量语义增强。
 
-## 能力
+## 界面预览
 
-- **视频检索**：视频入库转逐字稿，块级向量召回，命中后展开句级毫秒时间戳用于展示与跳转
-- **图片检索**：图片带向量与描述文本双重表示，支持以图搜图、以文搜图、图加文组合查询
-- **文本检索**：向量相似检索与关键词检索（FTS5）双路并行，加权合并
+**统一搜索：课程画面与逐字稿一起命中**
 
-## 架构
+![搜索「分镜」时，同时命中课程关键帧与逐字稿](docs/assets/demo/search-storyboard.png)
 
+**视频详情：播放、逐字稿与句级时间定位同屏**
+
+![课程视频的分镜画面、逐字稿与句级时间定位](docs/assets/demo/course-detail.png)
+
+**关键帧：场景画面与自动生成的描述**
+
+![Big Buck Bunny 的场景关键帧与画面描述](docs/assets/demo/keyframe-grid.png)
+
+演示素材来自 B 站公开视频，视频文件不纳入仓库。素材来源与许可说明见 [docs/demo-media.md](docs/demo-media.md)。
+
+## 两种部署档位
+
+| 能力 | 轻量版 `light` | 标准版 `standard` |
+|---|---|---|
+| 语音转写与句级时间戳 | 保留，云端 ASR | 保留，云端优先、本地 FunASR 兜底 |
+| 图片与视频帧描述 | 保留，云端视觉模型 | 保留 |
+| 逐字稿 FTS 关键词检索 | 保留 | 保留 |
+| 标题、标签、图片/帧描述关键词检索 | 保留 | 保留 |
+| 向量语义检索 | 关闭 | 开启 |
+| 以图搜图、相似图片推荐 | 不提供 | 提供 |
+| 本地模型依赖 | 不安装 EmbeddingGemma 2，不启用 FunASR | EmbeddingGemma 2 必需，FunASR 可选 |
+| 推理服务 | 只需 8281 | 8280 + 8281 |
+
+轻量版的核心定义是「ASR + 画面描述 + 关键词检索」。标准版在同一套代码上增加向量能力，不是另一条产品分支。未配置时默认 `standard`，保持旧部署行为。
+
+## 轻量版运行
+
+### Windows 本地验证
+
+```powershell
+$env:MATERIALSEEKER_PROFILE = "light"
+$env:MATERIALSEEKER_DATA_DIR = "C:/path/to/materialseeker-data"
+npm run dev
 ```
-浏览器 → Next.js（App Router，前端 + API）
-           ├── SQLite：素材元数据、逐字稿、块、句、帧、图片
-           │     ├── FTS5 虚拟表  → 关键词检索
-           │     └── 向量 BLOB    → KNN（个人库规模走暴力余弦）
-           └── Python 推理服务（本地 GPU，独立仓 MaterialSeeker-inference）
-                 └── 多模态编码器：文本 / 图片 / 视频 / 音频 → 768 维统一向量空间
+
+只做文本、图片和素材管理时，不需要启动任何 Python 服务，也不需要 8280/8281。视频与音频入库默认仍需要 8281 和云端 ASR 配置；已有 SRT 字幕时可通过 `subtitlePath` 直接复用，无需云端 ASR。
+
+### 无 GPU 的 Linux 服务器
+
+在 `MaterialSeeker-inference` 目录：
+
+```bash
+python3 -m venv ~/materialseeker-light-env
+~/materialseeker-light-env/bin/pip install -r requirements-light.txt
+cp .env.example .env
+# 编辑 .env：MATERIALSEEKER_PROFILE=light，并配置 ASR_CLOUD_KEY 与 GLM_API_KEY
+bash start.sh
 ```
 
-向量维度固定 768（EmbeddingGemma 2 原生维度，MRL 可截 512/256/128，默认全量）。
-个人库规模下向量查询走全表扫描加余弦计算，不引入 ANN 扩展。
+轻量启动脚本只启动 8281，并停止旧的 8280。`requirements-light.txt` 不包含 torch、FunASR、sentence-transformers 或模型权重；ffmpeg 仍需单独安装并用 `FFMPEG_BIN` 指定。
 
-四个组件都部署在同一台机器（dgx-spark），本机通过浏览器访问。
-推理侧代码在独立仓 `../MaterialSeeker-inference/`，部署路径 `~/materialseeker-inference`。
+业务仓与推理仓使用同一个开关：
+
+```bash
+MATERIALSEEKER_PROFILE=light npm run dev
+```
+
+## 标准版运行
+
+标准版沿用原来的两个独立 Python 环境：
+
+```bash
+# MaterialSeeker-inference
+cp .env.example .env
+# MATERIALSEEKER_PROFILE=standard，模型与密钥按文件内说明配置
+bash start.sh
+
+# MaterialSeeker
+MATERIALSEEKER_PROFILE=standard npm run dev
+```
+
+- 8280：`embedding_server.py`，EmbeddingGemma 2，768 维统一向量空间。
+- 8281：`video_server.py`，视频处理、云端/本地 ASR 与画面描述。
+- 业务侧只通过 HTTP 访问推理仓，不直接加载模型。
+
+## 切换边界
+
+- 切到轻量版不会删除数据库里的既有向量，只是不再调用它们。
+- 轻量版新入库素材的向量字段为 `NULL`。切回标准版后，既有向量仍可使用；轻量期间新增的素材用 `POST /api/maintenance/backfill-embeddings` 显式回填，不自动执行。
+- 轻量版不启用本地 FunASR 兜底。云端 ASR 未配置或不可用时，视频与音频入库会明确失败，不会偷偷下载本地模型。
+- `MATERIALSEEKER_FRAME_CAPTION=0` 可单独关闭视频帧描述，不影响 ASR 和关键词检索。
+
+## 数据与配置
+
+- 数据根目录默认 `<repo 上级>/app_datas/`，用 `MATERIALSEEKER_DATA_DIR` 覆盖。
+- 推理地址用 `MATERIALSEEKER_INFERENCE_URL` 与 `MATERIALSEEKER_VIDEO_URL` 覆盖。
+- 本地校验：`npm run check`。
+- 轻量专项测试：`bash scripts/test-light-mode.sh`；中文 FTS 测试：`bash scripts/test-fts-segment.sh`。
 
 ## 目录
 
 | 路径 | 内容 |
 |---|---|
 | `src/app/` | Next.js 页面与 API 路由 |
-| `src/lib/db.ts` | SQLite 单例、schema、向量编解码与余弦 |
-| `src/lib/chunking.ts` | 三种分块策略：场景对齐 / 固定窗口重叠 / 贪心字符 |
-| `src/lib/embed.ts` | 推理服务客户端，instruction 常量集中在此 |
-| `src/lib/search.ts` | 四路加权检索合并 |
-| `src/lib/ingest.ts` | 文本入库（M1 首条入库路径） |
+| `src/lib/db.ts` | SQLite、schema、向量编解码与余弦 |
+| `src/lib/embed.ts` | 部署档位与推理服务客户端 |
+| `src/lib/search.ts` | 标准向量检索与轻量关键词检索 |
+| `src/lib/ingest.ts` | 文本与图片入库 |
+| `src/lib/ingestVideo.ts` | 视频转写、抽帧、描述与入库 |
+| `src/lib/ingestAudio.ts` | 音频转写与入库 |
 
-推理服务已拆为独立仓 `../MaterialSeeker-inference/`（embedding :8280 与视频处理 :8281
-两个 Python 服务），本仓只保留 HTTP 客户端，经 `MATERIALSEEKER_INFERENCE_URL` 与
-`MATERIALSEEKER_VIDEO_URL` 指向它。
+## 致谢
 
-## 运行
-
-```bash
-# 1. 推理服务（独立仓 ../MaterialSeeker-inference，需 GPU 环境，跑在 dgx-spark）
-#    bash start.sh 起 embedding(:8280) 与视频处理(:8281) 两个服务，
-#    环境准备与配置见该仓 README
-
-# 2. Web 应用
-npm install
-npm run dev        # 端口 9280
-```
-
-推理服务地址默认 `http://127.0.0.1:8280` / `http://127.0.0.1:8281`，
-用 `MATERIALSEEKER_INFERENCE_URL` / `MATERIALSEEKER_VIDEO_URL` 覆盖（本机开发时
-指向 dgx-spark 的 192.168.1.170）。
-
-数据根目录默认 `<repo 上级>/app_datas/`，可用 `MATERIALSEEKER_DATA_DIR` 覆盖。
-
-## 当前进度
-
-M1 骨架可跑阶段：端到端只打通文本入库一路（`POST /api/ingest`），用来验证编码、写库、检索、展示四步串联。视频入库在 M2，图片与帧在 M3。
+视频音频处理与分块索引链路参考了 HearSight；图片检索与管理能力参考了 [SmartImager](https://github.com/li-xiu-qi/Smartlmager)。MaterialSeeker 在这些实践基础上独立演进，与上述项目无隶属关系。
 
 ## 许可
 
 Apache-2.0，见 [LICENSE](LICENSE)。
-
-## 致谢
-
-能力来源两个已有项目的复用与参考：视频音频侧的 HearSight 与图片侧的 SmartImager，分块与索引链路的实现方式沿用自前者。
