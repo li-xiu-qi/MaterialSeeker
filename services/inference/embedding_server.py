@@ -48,7 +48,7 @@ DEFAULT_QUERY_INSTRUCTION = "task: search result | query: "
 
 MODEL_DIR = os.environ.get(
     "MATERIALSEEKER_MODEL",
-    "/home/ke/models/embeddinggemma-2",
+    os.path.expanduser("~/models/embeddinggemma-2"),
 )
 
 
