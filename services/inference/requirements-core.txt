@@ -1,0 +1,6 @@
+# 两种部署档位共用的 HTTP 与云端 provider 依赖，不含本地模型。
+fastapi
+uvicorn
+pydantic
+openai
+requests
