@@ -1,28 +1,50 @@
 <div align="center">
   <img src="docs/assets/brand/logo.svg" alt="MaterialSeeker logo" width="96">
   <h1>MaterialSeeker</h1>
-  <p>本地优先的多模态内容检索工作台</p>
+  <p>为内容创作者打造的多模态素材检索工作台</p>
   <p><a href="README.md">中文</a> · <a href="README_EN.md">English</a></p>
+  <p>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache 2.0 license"></a>
+    <img src="https://img.shields.io/badge/Made%20for%20content%20creators-fbbf24" alt="Made for content creators">
+    <img src="https://img.shields.io/badge/Local--first-success" alt="Local first">
+    <img src="https://img.shields.io/badge/Light%20%2F%20Standard-2D3748" alt="Light and standard profiles">
+    <img src="https://img.shields.io/badge/Next.js-000000?logo=nextdotjs" alt="Next.js">
+    <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
+    <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi" alt="FastAPI">
+    <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite" alt="SQLite">
+  </p>
 </div>
 
-## MaterialSeeker 是什么
+## 让旧素材随时能被重新使用
 
-MaterialSeeker 把视频、图片、音频和文本笔记整理成一个可以统一检索的素材库。它不只记录文件名，还会把视频里的语音、场景画面、关键帧描述和正文变成可搜索的内容。
+MaterialSeeker 面向视频创作者、课程作者、播客和知识型创作者。它把散落在硬盘里的课程、B-roll、访谈、截图和笔记，整理成一个可以按画面与语言检索的素材库。
 
-你不用再从头拖进度条，也不用记住素材放在哪个文件夹。记得一句话、一个概念或一种画面，就能找到对应素材和发生的时间位置。素材与索引保存在自己的机器上，模型和供应商可以按部署条件选择。
+你要找的不再只是一个文件名，而是能用于下一个视频的那一帧、那句话、那段操作示范。素材与索引保存在自己的机器上，模型和供应商可以按部署条件选择。
 
-## 你能用它做什么
+> [!TIP]
+> **少拖一次进度条，多做一次内容复用。把找素材的时间还给创作本身。**
 
-- **课程学习**：搜索「分镜」「渲染」等概念，直接跳到老师讲解的那一句，同时查看对应幻灯片或操作画面。
-- **视频素材整理**：按场景抽取关键帧，用画面描述寻找人物、环境、物体和视觉风格。
-- **会议与访谈**：从逐字稿里找到原句，回看上下文，而不是只得到一段孤立的文本。
-- **图片与资料管理**：用标签、描述和关键词管理素材；标准版还可以用向量语义增强检索。
+## 你能得到什么效果
+
+| 创作现场 | 使用 MaterialSeeker 后 |
+| --- | --- |
+| 想找一段 B-roll | 直接描述「兔子在草地上跳」，命中对应关键帧和时间点，不必逐段拖视频 |
+| 想复用课程或访谈内容 | 搜索一个概念或一句原话，跳到讲解的那一句，同时查看上下文和对应画面 |
+| 想整理长期积累的素材 | 老视频、图片、音频和笔记进入同一个库，按素材库、标签、描述与关键词重新组织 |
+| 想减少重复劳动 | 自动转写、场景检测、抽帧和画面描述，不再手工记时间码、逐张写备注 |
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/brand/creator-workflow.zh.compact.svg">
+  <img src="docs/assets/brand/creator-workflow.zh.svg" alt="创作者从素材堆积到定位镜头并复用的工作流">
+</picture>
+
+一句话概括：**从「我记得有这段」到「找到这一帧，继续创作」。**
 
 ## 核心能力
 
 | 能力 | 你能得到什么 |
 | --- | --- |
-| 多模态入库 | 视频、图片、音频和文本放进同一个素材库，按素材库分类管理 |
+| 多模态素材库 | 视频、图片、音频和文本放进同一个素材库，按主题或项目分类管理 |
 | 转写与时间定位 | 中文语音转写、句级时间戳、点击句子跳转播放 |
 | 场景与画面理解 | 自动检测场景、抽取关键帧，并为画面生成描述 |
 | 关键词与语义检索 | SQLite FTS5 关键词检索，标准版加入 EmbeddingGemma 2 向量语义增强 |

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 780" width="100%" height="auto" role="img" aria-labelledby="title desc">
+  <title id="title">From memory to the exact frame</title>
+  <desc id="desc">A compact creator workflow: one searchable archive, natural language search, and exact frames to reuse.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#111827"/><stop offset="100%" stop-color="#020617"/></linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/></marker>
+  </defs>
+  <rect width="600" height="780" rx="20" fill="url(#bg)"/>
+  <text x="32" y="52" fill="#f8fafc" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="28" font-weight="700">From memory to the exact frame</text>
+  <text x="32" y="82" fill="#94a3b8" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="18">Your creative archive should do more than sit in folders</text>
+
+  <rect x="32" y="104" width="536" height="166" rx="16" fill="#22d3ee" fill-opacity="0.07" stroke="#22d3ee" stroke-opacity="0.55"/>
+  <rect x="56" y="126" width="40" height="32" rx="5" fill="none" stroke="#22d3ee" stroke-width="2.5"/>
+  <path d="M72 134 L84 142 L72 150 Z" fill="#22d3ee"/>
+  <text x="116" y="153" fill="#f8fafc" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="24" font-weight="600">Your archive</text>
+  <text x="56" y="198" fill="#e2e8f0" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="20">Courses / B-roll</text>
+  <text x="56" y="230" fill="#e2e8f0" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="20">Interviews / Images / Notes</text>
+  <text x="56" y="258" fill="#67e8f9" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="18">One searchable library</text>
+
+  <path d="M300 278 V300" stroke="#94a3b8" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="32" y="310" width="536" height="176" rx="16" fill="#a78bfa" fill-opacity="0.07" stroke="#a78bfa" stroke-opacity="0.55"/>
+  <circle cx="69" cy="338" r="15" fill="none" stroke="#a78bfa" stroke-width="3"/>
+  <path d="M80 350 L91 361" stroke="#a78bfa" stroke-width="3" stroke-linecap="round"/>
+  <text x="116" y="353" fill="#f8fafc" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="24" font-weight="600">Just ask</text>
+  <rect x="56" y="374" width="488" height="40" rx="8" fill="#0f172a" stroke="#475569"/>
+  <text x="72" y="400" fill="#e2e8f0" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="20">“Bunny jumping on grass”</text>
+  <rect x="56" y="426" width="488" height="40" rx="8" fill="#0f172a" stroke="#475569"/>
+  <text x="72" y="452" fill="#e2e8f0" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="20">“Where is the storyboard?”</text>
+  <text x="56" y="478" fill="#c4b5fd" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="18">Search frames and speech together</text>
+
+  <path d="M300 494 V516" stroke="#94a3b8" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="32" y="526" width="536" height="176" rx="16" fill="#fbbf24" fill-opacity="0.07" stroke="#fbbf24" stroke-opacity="0.7"/>
+  <circle cx="70" cy="555" r="18" fill="none" stroke="#fbbf24" stroke-width="2.5"/>
+  <path d="M65 546 L79 555 L65 564 Z" fill="#fbbf24"/>
+  <text x="116" y="570" fill="#f8fafc" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="24" font-weight="600">Create again</text>
+  <text x="56" y="625" fill="#fbbf24" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="34" font-weight="700">02:14</text>
+  <path d="M56 644 H544" stroke="#475569" stroke-width="4" stroke-linecap="round"/>
+  <path d="M56 644 H280" stroke="#fbbf24" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="280" cy="644" r="7" fill="#fbbf24"/>
+  <text x="56" y="680" fill="#e2e8f0" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="20">Seek / Clip / Reference / Reuse</text>
+
+  <text x="32" y="748" fill="#f8fafc" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="22" font-weight="600">Less scrubbing. More creating.</text>
+</svg>

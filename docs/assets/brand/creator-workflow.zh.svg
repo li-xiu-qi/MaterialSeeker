@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" width="100%" height="auto" role="img" aria-labelledby="title desc">
+  <title id="title">从记得有这段到找到这一帧</title>
+  <desc id="desc">创作者把课程、B-roll、访谈和图片放入素材库，用自然语言搜索，定位原句与关键帧并继续创作。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="420" rx="20" fill="url(#bg)"/>
+  <path d="M0 330 H1200" stroke="#1e293b" stroke-width="1"/>
+  <text x="48" y="58" fill="#f8fafc" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="30" font-weight="700">从「记得有这段」到「找到这一帧」</text>
+  <text x="48" y="88" fill="#94a3b8" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="18">创作者的素材，不该只躺在文件夹里</text>
+
+  <path d="M386 225 H420" stroke="#94a3b8" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M776 225 H810" stroke="#94a3b8" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <rect x="40" y="112" width="340" height="202" rx="16" fill="#22d3ee" fill-opacity="0.07" stroke="#22d3ee" stroke-opacity="0.55"/>
+  <rect x="64" y="132" width="44" height="34" rx="5" fill="none" stroke="#22d3ee" stroke-width="2.5"/>
+  <path d="M82 141 L94 149 L82 157 Z" fill="#22d3ee"/>
+  <path d="M70 126 H102" stroke="#22d3ee" stroke-width="2.5" stroke-linecap="round"/>
+  <text x="124" y="155" fill="#f8fafc" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="22" font-weight="600">素材在手里</text>
+  <text x="64" y="204" fill="#e2e8f0" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="19">课程视频 / B-roll</text>
+  <text x="64" y="238" fill="#e2e8f0" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="19">访谈录音 / 图片 / 笔记</text>
+  <text x="64" y="282" fill="#67e8f9" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="18">统一放进一个素材库</text>
+
+  <rect x="430" y="112" width="340" height="202" rx="16" fill="#a78bfa" fill-opacity="0.07" stroke="#a78bfa" stroke-opacity="0.55"/>
+  <circle cx="467" cy="146" r="15" fill="none" stroke="#a78bfa" stroke-width="3"/>
+  <path d="M478 158 L489 169" stroke="#a78bfa" stroke-width="3" stroke-linecap="round"/>
+  <text x="514" y="155" fill="#f8fafc" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="22" font-weight="600">说一句人话</text>
+  <rect x="454" y="178" width="292" height="42" rx="8" fill="#0f172a" stroke="#475569"/>
+  <text x="470" y="205" fill="#e2e8f0" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="18">「兔子在草地上跳」</text>
+  <rect x="454" y="232" width="292" height="42" rx="8" fill="#0f172a" stroke="#475569"/>
+  <text x="470" y="259" fill="#e2e8f0" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="18">「分镜在哪一段？」</text>
+  <text x="454" y="299" fill="#c4b5fd" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="18">画面与原句一起找</text>
+
+  <rect x="820" y="112" width="340" height="202" rx="16" fill="#fbbf24" fill-opacity="0.07" stroke="url(#accent)" stroke-opacity="0.75"/>
+  <circle cx="867" cy="149" r="18" fill="none" stroke="#fbbf24" stroke-width="2.5"/>
+  <path d="M862 140 L876 149 L862 158 Z" fill="#fbbf24"/>
+  <text x="904" y="155" fill="#f8fafc" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="22" font-weight="600">拿到镜头继续创作</text>
+  <text x="844" y="213" fill="#fbbf24" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="34" font-weight="700">02:14</text>
+  <path d="M844 232 H1134" stroke="#475569" stroke-width="4" stroke-linecap="round"/>
+  <path d="M844 232 H962" stroke="#fbbf24" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="962" cy="232" r="7" fill="#fbbf24"/>
+  <text x="844" y="273" fill="#e2e8f0" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="19">定位原句 · 抽帧 · 剪辑 · 复用</text>
+  <text x="844" y="301" fill="#fde68a" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="18">不用从头再看一遍</text>
+
+  <text x="48" y="378" fill="#f8fafc" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="20" font-weight="600">少拖一次进度条，多做一次内容复用</text>
+  <text x="1000" y="378" fill="#64748b" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, system-ui, sans-serif" font-size="18">CREATOR WORKFLOW</text>
+</svg>

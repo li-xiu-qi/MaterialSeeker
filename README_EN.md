@@ -1,28 +1,50 @@
 <div align="center">
   <img src="docs/assets/brand/logo.svg" alt="MaterialSeeker logo" width="96">
   <h1>MaterialSeeker</h1>
-  <p>A local-first multimodal content search workbench</p>
+  <p>A multimodal asset search workbench for content creators</p>
   <p><a href="README.md">中文</a> · <a href="README_EN.md">English</a></p>
+  <p>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache 2.0 license"></a>
+    <img src="https://img.shields.io/badge/Made%20for%20content%20creators-fbbf24" alt="Made for content creators">
+    <img src="https://img.shields.io/badge/Local--first-success" alt="Local first">
+    <img src="https://img.shields.io/badge/Light%20%2F%20Standard-2D3748" alt="Light and standard profiles">
+    <img src="https://img.shields.io/badge/Next.js-000000?logo=nextdotjs" alt="Next.js">
+    <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
+    <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi" alt="FastAPI">
+    <img src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite" alt="SQLite">
+  </p>
 </div>
 
-## What is MaterialSeeker?
+## Make your archive reusable
 
-MaterialSeeker turns videos, images, audio files, and text notes into one searchable library. Instead of indexing only filenames, it makes speech, scene frames, keyframe captions, and written content searchable.
+MaterialSeeker is built for video creators, course authors, podcasters, and knowledge creators. It turns scattered course recordings, B-roll, interviews, screenshots, and notes into one library you can search by visual content or natural language.
 
-You no longer need to scrub through an entire timeline or remember where a file is stored. A phrase, a concept, or a visual memory is enough to locate the source and the moment it happened. Your media and indexes stay on your machine, while models and providers can be selected for your deployment.
+You are no longer limited to finding a filename. You can find the exact frame, quote, or software demonstration you need for your next video. Your media and indexes stay on your machine, while models and providers can be selected for your deployment.
 
-## What can you do with it?
+> [!TIP]
+> **Less scrubbing. More creating. Spend your time on the next video, not on finding the last one.**
 
-- **Learn from courses**: search for concepts such as storyboarding or rendering, jump to the exact sentence, and see the matching slide or software view.
-- **Organize video assets**: extract scene keyframes and find people, places, objects, and visual styles through frame descriptions.
-- **Review meetings and interviews**: find the original sentence in a transcript and replay its context instead of reading an isolated text fragment.
-- **Manage images and notes**: organize assets with tags, captions, and keywords. The standard profile also adds vector-based semantic retrieval.
+## What you can achieve
+
+| Creative task | What MaterialSeeker lets you do |
+| --- | --- |
+| Find a piece of B-roll | Describe a scene such as “bunny jumping on grass” and get the matching keyframe and timestamp instead of scrubbing the whole video |
+| Reuse a course or interview | Search for a concept or an exact quote, jump to that sentence, and review the context and the matching visual |
+| Build a long-term asset library | Bring old videos, images, audio, and notes into one place, organized by collection, tags, captions, and keywords |
+| Reduce repetitive work | Automate transcription, scene detection, keyframe extraction, and frame captions instead of logging timecodes and writing notes manually |
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/brand/creator-workflow.en.compact.svg">
+  <img src="docs/assets/brand/creator-workflow.en.svg" alt="A creator workflow from a media archive to finding and reusing the exact frame">
+</picture>
+
+In short: **go from “I remember this” to “here is the frame I can create with.”**
 
 ## Core capabilities
 
 | Capability | What you get |
 | --- | --- |
-| Multimodal ingestion | Videos, images, audio, and text in one library, organized into separate collections |
+| Multimodal asset library | Videos, images, audio, and text in one library, organized by project or topic |
 | Transcription and seeking | Chinese speech-to-text, sentence-level timestamps, and click-to-play navigation |
 | Scene and visual understanding | Automatic scene detection, keyframe extraction, and AI-generated frame captions |
 | Keyword and semantic search | SQLite FTS5 keyword search, with optional EmbeddingGemma 2 vector retrieval in the standard profile |
