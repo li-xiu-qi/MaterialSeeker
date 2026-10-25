@@ -1,0 +1,7 @@
+# 轻量版：ASR 与画面描述走云端 provider，不安装任何本地模型依赖。
+-r requirements-core.txt
+
+# 视频场景检测与抽帧仍保留，均为 CPU 依赖。
+scenedetect==0.7.1
+opencv-python-headless==5.0.0.93
+numpy

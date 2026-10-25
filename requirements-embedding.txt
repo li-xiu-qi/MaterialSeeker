@@ -1,0 +1,12 @@
+# embedding 服务（embedding_server.py，:8280）依赖。
+# 装在 dgx-spark 的 xinfer-env（torch 2.14 + CUDA 13），与视频服务分环境，
+# 因为 embedding 走 torch 2.14，视频处理走 funasr（torchaudio 版本要求不同），
+# 合成一个环境两边都会坏。
+torch==2.14.0
+sentence-transformers>=5.0
+fastapi
+uvicorn
+pydantic
+pillow
+# caption 能力走在线视觉模型，用 OpenAI 兼容客户端
+openai

@@ -1,0 +1,13 @@
+# 视频处理服务（video_server.py，:8281）依赖。
+# 装在 dgx-spark 的 hearsight-env，与 embedding 服务分环境，别合并。
+fastapi
+uvicorn
+pydantic
+# 场景检测 + 抽帧。headless 版不带 GUI 依赖，服务端用这个
+scenedetect==0.7.1
+opencv-python-headless==5.0.0.93
+numpy
+# 中文 ASR（Paraformer 系，懒加载，首个转写请求时才加载）
+funasr==1.4.16
+# requests 保留给后续外部调用扩展
+requests
