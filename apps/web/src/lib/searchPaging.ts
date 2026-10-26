@@ -28,6 +28,22 @@ export const RESULT_PAGE = 12
 export const MAX_RESULT_SHOWN = 200
 
 /**
+ * 多取一条作为「还有下一页」的探针。只按 shown 请求时，返回值长度最多等于 shown，
+ * 调用方永远不可能知道后面是否还有结果。
+ */
+export function resultRequestSize(shown: number): number {
+  return Math.min(Math.max(1, shown + 1), MAX_RESULT_SHOWN)
+}
+
+/** 当前页只展示 shown 条，额外那条只用于判断是否有更多结果。 */
+export function resultWindow<T>(hits: T[], shown: number): { items: T[]; hasMore: boolean } {
+  return {
+    items: hits.slice(0, shown),
+    hasMore: shown < MAX_RESULT_SHOWN && hits.length > shown,
+  }
+}
+
+/**
  * 翻页要带上的当前状态。**q 与 m 都不能丢。**
  *
  * 丢 q 的话翻页链接指向落地页，点一下搜索词就没了；丢 m 的话翻页后类型筛选被

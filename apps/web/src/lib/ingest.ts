@@ -53,7 +53,7 @@ export async function ingestText(
     .run(assetId, content, 'zh', 'import')
   const transcriptId = Number(insertTranscript.lastInsertRowid)
 
-  const insertNote = db
+  db
     .prepare('INSERT INTO text_notes (asset_id, content, embedding) VALUES (?, ?, ?)')
     .run(assetId, content, vectors[0] ? embeddingToBlob(vectors[0]) : null)
 

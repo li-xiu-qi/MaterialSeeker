@@ -1,6 +1,6 @@
 import { RECENT_LIMIT } from '@/lib/recent'
 import { ASSET_KINDS } from '@/lib/mediaKind'
-import { RESULT_PAGE, MAX_RESULT_SHOWN, resultParams } from '@/lib/searchPaging'
+import { RESULT_PAGE, MAX_RESULT_SHOWN, resultParams, resultRequestSize, resultWindow } from '@/lib/searchPaging'
 import Link from 'next/link'
 import { search } from '@/lib/search'
 import { embeddingEnabled } from '@/lib/embed'
@@ -132,15 +132,17 @@ export default async function HomePage({
   const query = q?.trim() ?? ''
   const lightMode = !embeddingEnabled()
   // 类型筛选。m 参数后端一直支持，但此前没有任何 UI 能设置它，等于白做。
-  const modality = (m === 'video' || m === 'image' || m === 'text' ? m : 'all') as
+  const modality = (m === 'video' || m === 'image' || m === 'audio' || m === 'text' ? m : 'all') as
     | 'all'
     | 'video'
     | 'image'
+    | 'audio'
     | 'text'
 
   let items: ResultItem[] = []
   let error: string | null = null
   let hitCount = 0
+  let hasMore = false
   // **已显示条数。** 从 URL 来，不用客户端 state：翻页是换一批结果，与「检索」一样
   // 该是能分享、能刷新的链接。
   const shown = Math.max(
@@ -159,10 +161,12 @@ export default async function HomePage({
       const hits = await search(query, {
         modality,
         collectionId,
-        topK: shown,
+        topK: resultRequestSize(shown),
       })
-      hitCount = hits.length
-      items = hits.map((h): ResultItem => {
+      const resultPage = resultWindow(hits, shown)
+      hasMore = resultPage.hasMore
+      hitCount = resultPage.items.length
+      items = resultPage.items.map((h): ResultItem => {
         if (h.type === 'chunk') {
           return {
             key: `${h.type}:${h.id}:${h.source}`,
@@ -186,6 +190,25 @@ export default async function HomePage({
               videoUrl: toMediaUrl(h.assetPath),
               seekHref: seekHref(h.assetId, collectionId, h.startMs, h.assetKind),
             },
+          }
+        }
+
+        if (h.type === 'audio') {
+          const duration = h.durationMs ? ` · 时长 ${fmtMs(h.durationMs)}` : ''
+          return {
+            key: `${h.type}:${h.id}:${h.source}`,
+            type: h.type,
+            source: h.source,
+            score: h.score,
+            text: '音频内容命中，可直接试听或查看详情',
+            title: h.assetTitle,
+            meta: `${h.assetTitle}${duration}`,
+            mediaUrl: null,
+            audioUrl: toMediaUrl(h.filePath),
+            detailHref: `${detailHrefFor('audio', h.assetId)}?lib=${libParam(collectionId)}`,
+            coverUrl: null,
+            isVideo: false,
+            chunk: null,
           }
         }
 
@@ -229,7 +252,7 @@ export default async function HomePage({
   // 类型筛选条。用链接而不是按钮：不需要 JS，且当前选中项一眼可见。
   // 落地态它筛的是「最近入库」那一排，结果态筛的是结果流，同一个参数两处生效。
   const filterBar = (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto pb-1 sm:flex-wrap">
       <span className="text-xs text-neutral-400">类型</span>
       {MODALITIES.map((mo) => {
         const params = new URLSearchParams()
@@ -244,11 +267,7 @@ export default async function HomePage({
           <Link
             key={mo.value}
             href={href}
-            className={`rounded border px-2 py-0.5 text-xs transition ${
-              active
-                ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
-                : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
-            }`}
+            className={`filter-chip ${active ? 'filter-chip-active' : ''}`}
           >
             {mo.label}
           </Link>
@@ -262,27 +281,20 @@ export default async function HomePage({
     <form
       action="/"
       method="get"
-      className={big ? 'w-full max-w-2xl' : 'flex gap-2'}
+      data-tour="search-assets"
+      className={big ? 'search-panel mt-5 flex w-full gap-2 sm:gap-3' : 'mt-4 flex gap-2 sm:gap-3'}
     >
       <input type="hidden" name="lib" value={libParam(collectionId)} />
       <input
         name="q"
         defaultValue={query}
-        autoFocus={big}
+        aria-label="搜索素材"
         placeholder="搜什么，比如「网球场上的运动员」"
-        className={
-          big
-            ? 'w-full rounded-lg border border-neutral-700 bg-neutral-900 px-4 py-3 text-base outline-none focus:border-neutral-500'
-            : 'flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm outline-none focus:border-neutral-500'
-        }
+        className="min-h-11 w-full min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-base text-neutral-100 placeholder:text-neutral-500 focus:border-neutral-500"
       />
       <button
         type="submit"
-        className={
-          big
-            ? 'mt-3 w-full rounded-lg bg-neutral-100 px-4 py-3 text-sm font-medium text-neutral-900'
-            : 'rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900'
-        }
+        className="btn-primary w-auto flex-none"
       >
         搜索
       </button>
@@ -292,7 +304,7 @@ export default async function HomePage({
   // --- 落地态：检索栏居中 + 最近入库 ---
   if (!query) {
     const counts = getLibraryCounts(collectionId)
-    const empty = counts.video + counts.image + counts.text === 0
+    const empty = counts.video + counts.image + counts.audio + counts.text === 0
     // **只取最近 5 条，没有分页。** 这一排是引导不是浏览入口，要看全部有左侧
     // 「素材库」导航。理由与曾经矫枉过正的过程见 lib/recent。
     // 类型传给 SQL，不取回来再筛：按文本看最近时，若先取 5 条再筛，而那 5 条
@@ -304,7 +316,7 @@ export default async function HomePage({
     const total = empty
       ? 0
       : modality === 'all'
-        ? counts.video + counts.image + counts.text
+        ? counts.video + counts.image + counts.audio + counts.text
         : counts[modality]
 
     /*
@@ -324,11 +336,12 @@ export default async function HomePage({
       说得过去——空库只在新装时出现，为它牺牲常态首屏不值。
     */
     return (
-      <div className="flex flex-col">
-        <div className="flex flex-col items-center px-4 pt-14">
-          <h1 className="text-3xl font-semibold text-neutral-100">找点什么</h1>
-          <p className="mt-2 text-sm text-neutral-400">文字、画面、视频里的对白，一个框都能搜</p>
-          <div className="mt-6 flex w-full justify-center">{form(true)}</div>
+      <div className="mx-auto w-full max-w-6xl">
+        <div className="pt-1 md:pt-6">
+          <p className="eyebrow">多模态素材检索</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-100 sm:text-3xl">找到那一帧，继续创作。</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400 sm:text-base">标题、画面、逐字稿和笔记，从一个搜索框直达素材。</p>
+          <div className="w-full">{form(true)}</div>
           {lightMode && (
             <p className="mt-3 text-xs text-neutral-400">
               轻量模式：语音转写与画面描述保留，当前按关键词检索
@@ -356,8 +369,8 @@ export default async function HomePage({
         </div>
 
         {recent.length > 0 && (
-          <section className="mt-8 border-t border-neutral-800 pt-6">
-            <div className="flex items-baseline justify-between gap-3">
+          <section className="mt-7 border-t border-neutral-800 pt-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="flex-none text-sm font-medium text-neutral-300">
                 最近入库
                 {/*
@@ -368,10 +381,10 @@ export default async function HomePage({
                   {total > 0 ? `库里共 ${total} 条` : ''}
                 </span>
               </h2>
-              <div className="flex-none">{filterBar}</div>
+              <div className="order-3 w-full sm:order-none sm:w-auto sm:flex-none">{filterBar}</div>
               <Link
                 href="/library"
-                className="text-xs text-neutral-400 underline hover:text-neutral-300"
+                className="text-xs text-neutral-300 underline underline-offset-4 hover:text-neutral-100"
               >
                 去素材库看全部
               </Link>
@@ -390,12 +403,13 @@ export default async function HomePage({
               **栏数必须与 RECENT_LIMIT 除得尽**：5 列放 10 张正好两行。留余数会让
               最后一行空几格，看着像少加载了几张、像列表坏了。
             */}
-            <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <ul className="recent-grid mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {recent.map((r) => (
-                <li key={`${r.kind}-${r.id}`}>
+                <li key={`${r.kind}-${r.id}`} className="recent-asset">
                   <Link
                     href={r.detailHref}
-                    className="block rounded-md border border-neutral-800 bg-neutral-900/60 p-2 transition hover:border-neutral-600"
+                    title={r.title}
+                    className="asset-card recent-asset-link group"
                   >
                     {/*
                       缩略图两条。
@@ -416,15 +430,17 @@ export default async function HomePage({
                       <img
                         src={toThumbUrl(r.thumbUrl, 320) ?? r.thumbUrl}
                         alt=""
-                        className="aspect-[16/9] w-full rounded border border-neutral-800 bg-neutral-900 object-contain"
+                        className="aspect-[16/10] w-full bg-neutral-950 object-contain"
                       />
                     ) : (
-                      <div className="flex aspect-[16/9] items-center justify-center rounded border border-neutral-800 bg-neutral-900 text-xs text-neutral-400">
+                      <div className="flex aspect-[16/10] items-center justify-center bg-neutral-950 text-xs text-neutral-400">
                         {KIND_LABEL[r.kind]}
                       </div>
                     )}
-                    <p className="mt-1.5 truncate text-xs text-neutral-300">{r.title}</p>
-                    <p className="text-[10px] text-neutral-400">{KIND_LABEL[r.kind]}</p>
+                    <div className="p-2.5">
+                      <p className="truncate text-xs font-medium text-neutral-200 sm:text-sm">{r.title}</p>
+                      <p className="mt-1 text-[11px] text-neutral-400">{KIND_LABEL[r.kind]}</p>
+                    </div>
                   </Link>
                 </li>
               ))}
@@ -437,7 +453,7 @@ export default async function HomePage({
 
   // --- 结果态：检索栏在顶部 ---
   return (
-    <div className="mx-auto max-w-4xl">
+    <div className="mx-auto w-full max-w-5xl">
       {/*
         **结果态要有标题，落地态的「找点什么」不算。** 两者是不同性质的东西：
         落地态那句是邀请第一次来的人动手，属于内容文案；结果态这里要回答的是
@@ -447,9 +463,10 @@ export default async function HomePage({
 
         说清查询词与条数，是因为结果多时要能一眼看出「这是按哪个词搜出来的」。
       */}
-      <h1 className="text-2xl font-semibold">
+      <p className="eyebrow">素材检索</p>
+      <h1 className="mt-1 text-2xl font-semibold tracking-tight">
         搜索结果
-        <span className="ml-2 text-sm font-normal text-neutral-400">
+        <span className="mt-1 block text-sm font-normal text-neutral-400 sm:ml-2 sm:mt-0 sm:inline">
           「{query}」· {hitCount} 条
         </span>
       </h1>
@@ -492,12 +509,12 @@ export default async function HomePage({
 
       {!error && hitCount > 0 && <ResultList items={items} />}
 
-      {!error && hitCount > shown && (
+      {!error && hasMore && (
         <Link
-          href={`/?${resultParamsForPage.toString()}&s=${shown + RESULT_PAGE}`}
+          href={`/?${resultParamsForPage.toString()}&s=${Math.min(shown + RESULT_PAGE, MAX_RESULT_SHOWN)}`}
           className="mt-4 block w-full rounded-md border border-neutral-800 px-3 py-2 text-center text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200"
         >
-          显示更多结果（还有 {hitCount - shown} 条）
+          显示更多结果
         </Link>
       )}
     </div>

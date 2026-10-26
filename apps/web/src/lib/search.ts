@@ -1,10 +1,11 @@
 /**
- * 检索层。四路加权合并：
+ * 检索层。五路加权合并：
  *
  * 1. frames.embedding          帧本身的向量
  * 2. frames.caption_embedding  帧描述文本的向量
  * 3. chunks.embedding          逐字稿块的向量
  * 4. images.embedding          入库图片的向量
+ * 5. audio_files.embedding     音频文件本身的向量
  *
  * 首版按等权起步（PRD 开放问题 5）。权重无实测依据，调参需要一批真实
  * 查询做样本，在那之前任何权重都是拍的。
@@ -78,7 +79,23 @@ export interface ImageHit {
   caption: string | null
 }
 
-export type SearchHit = ChunkHit | FrameHit | ImageHit
+/**
+ * 音频文件本身的命中。**与 chunk 路分开**：chunk 路检索的是转写文本，这一路
+ * 检索的是音频内容向量，两者解决不同问题。没有时间戳，因为整条音频一个向量，
+ * 定位不到「第几秒说的是什么」；要句级定位仍然走逐字稿 chunk 路。
+ */
+export interface AudioHit {
+  type: 'audio'
+  id: number
+  score: number
+  source: 'audio_vector' | 'keyword'
+  assetId: number
+  assetTitle: string
+  filePath: string
+  durationMs: number | null
+}
+
+export type SearchHit = ChunkHit | FrameHit | ImageHit | AudioHit
 
 /**
  * 每一路至少给这么多。**搜索分页靠它穿透。**
@@ -122,12 +139,19 @@ export async function search(
   const db = getDb()
 
   const hits: SearchHit[] = []
+  const chunkKinds = modality === 'all' ? ['video', 'audio', 'text'] : modality === 'image' ? [] : [modality]
+  const chunkKindPlaceholders = chunkKinds.map(() => '?').join(',')
+  let queryVector: Float32Array | undefined
+  const getQueryVector = async () => {
+    if (!queryVector) [queryVector] = await encodeText(query, 'query')
+    return queryVector
+  }
 
-  // --- 路 3：逐字稿块向量（视频与音频共用）---
-  // 音频的检索语料与视频同构：都是 chunks + sentences + transcripts，区别只在
-  // 音频没有 frames。**不为音频单开一路**，理由见 ChunkHit.assetKind 的注释。
-  if (modality === 'all' || modality === 'video' || modality === 'audio') {
-    const [qVec] = await encodeText(query, 'query')
+  // --- 路 3：逐字稿块向量（视频、音频与文本共用）---
+  // 三类素材的检索语料同构，模态过滤落在 assets.kind 上。音频与文本没有 frames，
+  // 不能因为共用 chunks 就把视频的帧结果带进来。
+  if (chunkKinds.length > 0) {
+    const qVec = await getQueryVector()
     const rows = db
       .prepare(
         `SELECT c.id, c.text, c.start_ms, c.end_ms, c.embedding,
@@ -137,9 +161,9 @@ export async function search(
                   ORDER BY f.timestamp_ms LIMIT 1) AS cover_frame
          FROM chunks c JOIN transcripts t ON t.id = c.transcript_id
          JOIN assets a ON a.id = t.asset_id
-         WHERE c.embedding IS NOT NULL ${scope}`,
+         WHERE c.embedding IS NOT NULL ${scope} AND a.kind IN (${chunkKindPlaceholders})`,
       )
-      .all(...scopeArg) as Array<{
+      .all(...scopeArg, ...chunkKinds) as Array<{
       id: number
       text: string
       start_ms: number
@@ -169,7 +193,7 @@ export async function search(
         assetId: r.asset_id,
         assetTitle: r.title,
         assetPath: r.asset_path,
-        assetKind: (r.asset_kind === 'audio' ? 'audio' : 'video') as AssetKind,
+        assetKind: r.asset_kind as AssetKind,
         coverFrame: r.cover_frame,
         chunkText: r.text,
         startMs: r.start_ms,
@@ -178,14 +202,18 @@ export async function search(
       })
     }
 
-    // --- 路 1/2：帧向量与帧描述向量 ---
+  }
+
+  // --- 路 1/2：帧向量与帧描述向量，只属于视频 ---
+  if (modality === 'all' || modality === 'video') {
+    const qVec = await getQueryVector()
     const frames = db
       .prepare(
         `SELECT f.id, f.timestamp_ms, f.thumb_path, f.caption, f.embedding, f.caption_embedding,
                 a.id AS asset_id, a.title
          FROM frames f JOIN assets a ON a.id = f.asset_id
          WHERE (f.embedding IS NOT NULL OR f.caption_embedding IS NOT NULL)
-           ${scope}`,
+           AND a.kind = 'video' ${scope}`,
       )
       .all(...scopeArg) as Array<{
       id: number
@@ -229,7 +257,7 @@ export async function search(
 
   // --- 路 4：图片向量 ---
   if (modality === 'all' || modality === 'image') {
-    const [qVec] = await encodeText(query, 'query')
+    const qVec = await getQueryVector()
     const images = db
       .prepare(
         `SELECT im.id, im.file_path, im.caption, im.embedding, im.caption_embedding,
@@ -276,12 +304,53 @@ export async function search(
     }
   }
 
+  // --- 路 5：音频文件本身的向量 ---
+  // 与逐字稿路分开：这一路让文字查询直接匹配音频内容，不要求 ASR 先转写出
+  // 同样的词。音频模态因此会同时出现 chunk（转写）与 audio（声学/内容）两类
+  // 命中，去重键里的 type 不同，不会互相覆盖。
+  if (modality === 'all' || modality === 'audio') {
+    const qVec = await getQueryVector()
+    const audios = db
+      .prepare(
+        `SELECT af.id, af.file_path, af.duration_ms, af.embedding,
+                a.id AS asset_id, a.title
+         FROM audio_files af JOIN assets a ON a.id = af.asset_id
+         WHERE af.embedding IS NOT NULL ${scope}`,
+      )
+      .all(...scopeArg) as Array<{
+      id: number
+      file_path: string
+      duration_ms: number | null
+      embedding: Buffer
+      asset_id: number
+      title: string
+    }>
+
+    const audioScored = audios
+      .map((au) => ({ au, score: cosineSim(qVec, blobToEmbedding(au.embedding)) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, perRouteK)
+
+    for (const { au, score } of audioScored) {
+      hits.push({
+        type: 'audio',
+        id: au.id,
+        score,
+        source: 'audio_vector',
+        assetId: au.asset_id,
+        assetTitle: au.title,
+        filePath: au.file_path,
+        durationMs: au.duration_ms,
+      })
+    }
+  }
+
   // --- 关键词路（FTS5），与向量路并行存在 ---
   // 中文经索引侧分词（src/lib/segment.ts，触发器在写入时切分）后可用：查询侧
   // 过同一把刀，连续中文整句查询也能命中。英文与数字 token 行为不变。
   // 停用词查询（tokens 为空）不查：空串 MATCH 会抛错，而「只打了语气词」
   // 不是错误，是不该查。
-  if (modality === 'all' || modality === 'video' || modality === 'audio') {
+  if (chunkKinds.length > 0) {
     const tokens = segForQuery(query)
     const ftsQuery = tokens.length ? toFtsMatch(tokens) : ''
     if (ftsQuery) {
@@ -296,10 +365,10 @@ export async function search(
            FROM chunks_fts JOIN chunks c ON c.id = chunks_fts.rowid
            JOIN transcripts t ON t.id = c.transcript_id
            JOIN assets a ON a.id = t.asset_id
-           WHERE chunks_fts MATCH ? ${scope}
+           WHERE chunks_fts MATCH ? ${scope} AND a.kind IN (${chunkKindPlaceholders})
            ORDER BY rank LIMIT ?`,
         )
-        .all(ftsQuery, ...scopeArg, perRouteK) as Array<{
+        .all(ftsQuery, ...scopeArg, ...chunkKinds, perRouteK) as Array<{
         id: number
         text: string
         start_ms: number
@@ -323,7 +392,7 @@ export async function search(
           assetId: r.asset_id,
           assetTitle: r.title,
           assetPath: r.asset_path,
-          assetKind: (r.asset_kind === 'audio' ? 'audio' : 'video') as AssetKind,
+          assetKind: r.asset_kind as AssetKind,
           coverFrame: r.cover_frame,
           chunkText: r.text,
           startMs: r.start_ms,
@@ -423,7 +492,7 @@ async function searchWithoutEmbedding(
                 a.id AS asset_id, a.title
          FROM frames f JOIN assets a ON a.id = f.asset_id
          WHERE (a.title LIKE ? ESCAPE '\\' OR COALESCE(f.caption, '') LIKE ? ESCAPE '\\'
-                OR a.tags_json LIKE ? ESCAPE '\\') ${scope}
+                OR a.tags_json LIKE ? ESCAPE '\\') AND a.kind = 'video' ${scope}
          ORDER BY f.id DESC LIMIT ?`,
       )
       .all(pattern, pattern, pattern, ...scopeArg, perRouteK) as Array<{

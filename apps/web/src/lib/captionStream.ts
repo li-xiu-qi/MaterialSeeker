@@ -118,6 +118,6 @@ export function summarizeCaptionRun(ok: number, failed: CaptionFailure[]): strin
  * **全失败时留着**：那时候用户想做的就是重试，留着勾选是一键重来；清了反而要
  * 他再把同样的图勾一遍。
  */
-export function shouldClearSelectionAfterRun(ok: number, failed: CaptionFailure[]): boolean {
+export function shouldClearSelectionAfterRun(ok: number, _failed: CaptionFailure[]): boolean {
   return ok > 0
 }

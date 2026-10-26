@@ -47,9 +47,27 @@ In short: **go from “I remember this” to “here is the frame I can create w
 | Multimodal asset library | Videos, images, audio, and text in one library, organized by project or topic |
 | Transcription and seeking | Chinese speech-to-text, sentence-level timestamps, and click-to-play navigation |
 | Scene and visual understanding | Automatic scene detection, keyframe extraction, and AI-generated frame captions |
-| Keyword and semantic search | SQLite FTS5 keyword search, with optional EmbeddingGemma 2 vector retrieval in the standard profile |
+| Keyword, semantic, and cross-modal search | SQLite FTS5 keyword search, plus optional EmbeddingGemma 2 retrieval for text-to-image, text-to-video-frame, and text-to-audio search in the standard profile |
 | Asset management | Edit titles, captions, and tags; bulk delete, copy, move, and export assets |
+| Guided onboarding | A four-step tour through search, ingest, library browsing, and detail editing, with desktop/mobile layouts and an always-available entry point |
 | Flexible deployment | A light profile without GPU requirements and a standard profile with local vectors, connected over HTTP |
+
+## Keyword, semantic, and cross-modal search
+
+MaterialSeeker does more than index filenames and transcripts. The three retrieval modes solve different problems:
+
+- **Keyword search** uses SQLite FTS5 for transcript and note text, plus title, tag, and caption matching for video and image assets. It is available in both deployment profiles.
+- **Semantic search** retrieves content with a similar meaning rather than requiring the exact wording, useful for finding a concept in a course or the gist of an interview.
+- **Cross-modal search** places a text query, the visual content of images and video frames, and the content of audio in the same vector space, so you can search for what is visible or audible; audio also keeps speech transcripts, so keyword and semantic search can still match spoken sentences and seek to them.
+
+| Asset | What is actually indexed and searched | What this enables |
+| --- | --- | --- |
+| Video | Keyframe visuals, frame captions, transcripts, and titles | Find spoken ideas or search directly for scenes, people, actions, and objects that may never be mentioned in the transcript |
+| Image | Visual embeddings of the image itself, plus captions, titles, and tags | Images without written descriptions can still participate in visual semantic search once their vectors are ready |
+| Audio | Audio content embeddings, plus speech transcripts, sentence timestamps, and transcript-chunk vectors | Search audible content directly with text, or find and seek to spoken sentences through the transcript |
+| Text notes | Body text and its semantic vector | Use both exact keywords and related concepts to find notes |
+
+For example, “a tennis player sliding” may match a course transcript containing a related explanation or a video keyframe showing the action; “stadium crowd noise” can match audio content directly. Text, visuals, and sound appear together in one search entry point.
 
 ## Documentation
 

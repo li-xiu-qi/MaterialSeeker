@@ -6,21 +6,15 @@
  * 多选、进度条），文本没有文件，两种输入心智混在同一块区域会互相干扰。
  * 分成两张卡各管一种，用户一眼看出这块是填字的。
  */
-export function TextIngestForm({
-  collections,
-  currentCollectionId,
-}: {
-  collections: Array<{ id: number; name: string }>
-  currentCollectionId: number
-}) {
+export function TextIngestForm({ currentCollectionId }: { currentCollectionId: number }) {
   return (
-    <section className="mt-6 rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
-      <div className="flex items-baseline justify-between">
+    <section className="panel mt-4 p-4 sm:p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium text-neutral-200">入库文本</h2>
         <p className="text-xs text-neutral-400">笔记、文案、台词，填进去就能被检索</p>
       </div>
 
-      <form action="/api/ingest/text/form" method="post" className="mt-3 space-y-3">
+      <form action="/api/ingest/text/form" method="post" className="mt-3 space-y-3" data-tour="ingest-text">
         <input type="hidden" name="collectionId" value={currentCollectionId} />
 
         <div>
@@ -53,7 +47,7 @@ export function TextIngestForm({
 
         <button
           type="submit"
-          className="w-full rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900"
+          className="btn-primary w-full"
         >
           保存这段文本
         </button>

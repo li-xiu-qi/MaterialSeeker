@@ -1,7 +1,6 @@
 import { getDb, embeddingToBlob } from './db'
 import { DEFAULT_COLLECTION_ID } from './collections'
-import { PATHS } from './paths'
-import { encodeBatch, embeddingEnabled, PASSAGE_INSTRUCTION } from './embed'
+import { encodeAudio, encodeBatch, embeddingEnabled, PASSAGE_INSTRUCTION } from './embed'
 import { chunkGreedy, type Sentence } from './chunking'
 import { clearServiceProgress, pollServiceProgress } from './serviceProgress'
 import { asrEngineLabel } from './asrEngine'
@@ -10,9 +9,10 @@ import { asrEngineLabel } from './asrEngine'
  * 音频入库编排。**视频入库去掉「帧」那一半**，其余完全同构：
  *
  * 1. 调转写服务（8281 的 /transcribe）拿句级转写
- * 2. 起 asset + audio_files + transcript + transcript_sentences
- * 3. 分块并编码（默认 greedy，音频没有场景边界可用）
- * 4. chunks + sentences 落库
+ * 2. 编码音频文件本身的向量（标准档）
+ * 3. 起 asset + audio_files + transcript + transcript_sentences
+ * 4. 分块并编码转写文本（默认 greedy，音频没有场景边界可用）
+ * 5. chunks + sentences 落库
  *
  * **为什么单独一个文件而不是给 ingestVideo 加个 if**：视频那条路上挂着帧的
  * 抽取、编码、缩略图预热三步，音频一步都没有。加 if 会让这条链路里出现三处
@@ -31,6 +31,7 @@ export type AudioIngestStage =
   | 'queued'
   | 'prepare'
   | 'transcribe'
+  | 'audio-encode'
   | 'text-encode'
   | 'db'
   | 'done'
@@ -103,7 +104,17 @@ export async function ingestAudio(opts: AudioIngestOptions): Promise<AudioIngest
       text: s.sentence,
     }))
 
-    // --- 2. asset + audio_files + transcript + sentences ---
+    // --- 2. 音频文件本身的向量（标准档）---
+    // 放在任何数据库写入之前：推理失败就不留半个音频素材，用户重试时不会
+    // 看到「库里多了一条没有向量的音频」。轻量档跳过，audio_files.embedding
+    // 保持 NULL，之后可用回填接口补。
+    let audioVector: Float32Array | null = null
+    if (useEmbedding) {
+      stage('audio-encode')
+      ;[audioVector] = await encodeAudio(audioPath)
+    }
+
+    // --- 3. asset + audio_files + transcript + sentences ---
     const fullText = sentences.map((s) => s.text).join(' ')
     // 时长取最后一句的结尾，而不是 ffprobe 单独问一次：句级时间戳是转写服务
     // 已经算出来的，再探测一次文件是白等一轮 IO，且当转写为空句时两者都会是 0，
@@ -124,18 +135,16 @@ export async function ingestAudio(opts: AudioIngestOptions): Promise<AudioIngest
       )
     const assetId = Number(asset.lastInsertRowid)
 
-    db.prepare('INSERT INTO audio_files (asset_id, file_path, duration_ms) VALUES (?, ?, ?)').run(
-      assetId,
-      audioPath,
-      durationMs,
-    )
+    db.prepare(
+      'INSERT INTO audio_files (asset_id, file_path, duration_ms, embedding) VALUES (?, ?, ?, ?)',
+    ).run(assetId, audioPath, durationMs, audioVector ? embeddingToBlob(audioVector) : null)
 
     const tr = db
       .prepare('INSERT INTO transcripts (asset_id, full_text, language, asr_engine) VALUES (?, ?, ?, ?)')
       .run(assetId, fullText, 'zh', asrEngineLabel(data.asr_provider))
     const transcriptId = Number(tr.lastInsertRowid)
 
-    // --- 3. 分块 + 编码 ---
+    // --- 4. 分块 + 编码 ---
     // greedy 而不是 scene：音频没有画面，场景边界无从算起；固定窗口会把一句话
     // 从中间切断，命中后定位到半句比不命中更糟。
     if (useEmbedding) stage('text-encode')
@@ -151,7 +160,7 @@ export async function ingestAudio(opts: AudioIngestOptions): Promise<AudioIngest
       })
     }
 
-    // --- 4. 落库 ---
+    // --- 5. 落库 ---
     stage('db')
     const tx = db.transaction(() => {
       const insertTranscriptSentence = db.prepare(

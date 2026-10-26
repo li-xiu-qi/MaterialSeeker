@@ -3,7 +3,7 @@ import { createReadStream, statSync, existsSync } from 'node:fs'
 import { Readable } from 'node:stream'
 import path from 'node:path'
 import { PATHS } from '@/lib/paths'
-import { THUMB_WIDTHS, thumbKey, generateThumbs } from '@/lib/thumbs'
+import { thumbKey, generateThumbs } from '@/lib/thumbs'
 
 export const runtime = 'nodejs'
 

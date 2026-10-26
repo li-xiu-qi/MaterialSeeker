@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { MAX_TAGS } from '@/lib/tags'
+import { ModalShell } from './ModalShell'
 
 /**
  * 素材编辑的模态框。**改标题、描述、标签三样。**
@@ -51,37 +52,6 @@ export function AssetEditModal({
   const [err, setErr] = useState('')
   const firstField = useRef<HTMLInputElement>(null)
 
-  // 打开时重置成当前值：这个模态是行内复用的，第二次打开必须看到新那一行的值，
-  // 而不是上一次改到一半的内容。
-  useEffect(() => {
-    if (!open) return
-    setT(title)
-    setC(caption)
-    setG(tags.join('，'))
-    setErr('')
-    firstField.current?.focus()
-  }, [open, title, caption, tags])
-
-  // Esc 关、点遮罩关、锁背后滚动。与 MediaPreviewModal 同一套，两个模态行为不
-  // 一致的代价是用户每次都要重新试哪个能点哪个不能。
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
-      returnFocusTo?.focus()
-    }
-  }, [open, onClose, returnFocusTo])
-
   if (!open) return null
 
   async function save() {
@@ -128,17 +98,13 @@ export function AssetEditModal({
   const canEditCaption = kind === 'image'
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="编辑素材信息"
+    <ModalShell
+      onClose={onClose}
+      label="编辑素材信息"
+      returnFocusTo={returnFocusTo}
+      initialFocusRef={firstField}
     >
-      <div
-        className="w-full max-w-md space-y-3 rounded-lg border border-neutral-800 bg-neutral-950 p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="space-y-3">
         <p className="text-sm font-medium text-neutral-200">编辑素材信息</p>
 
         <div>
@@ -193,7 +159,7 @@ export function AssetEditModal({
             className="mt-1 w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-200 outline-none focus:border-neutral-500"
           />
           <p className="mt-1 text-xs text-neutral-400">
-            最多 {MAX_TAGS} 个。标签也会参与检索，填你之后会用来搜的词
+            最多 {MAX_TAGS} 个。标签用于整理素材；图片与视频还可按标签关键词检索
           </p>
         </div>
 
@@ -204,7 +170,7 @@ export function AssetEditModal({
             type="button"
             onClick={save}
             disabled={saving}
-            className="rounded bg-neutral-100 px-4 py-1.5 text-sm font-medium text-neutral-900 disabled:opacity-40"
+            className="btn-primary px-4 py-1.5 text-sm disabled:opacity-40"
           >
             {saving ? '保存中' : '保存'}
           </button>
@@ -217,6 +183,6 @@ export function AssetEditModal({
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   )
 }

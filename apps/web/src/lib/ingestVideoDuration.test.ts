@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { Database } from 'better-sqlite3'
 
 vi.mock('./embed', () => ({
   encodeBatch: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock('./serviceProgress', () => ({
 }))
 
 let dataDir: string
-let db: any
+let db: Database
 
 beforeEach(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'materialseeker-video-duration-'))
@@ -46,6 +47,13 @@ function mockProcessResponse(payload: Record<string, unknown>) {
   )
 }
 
+function storedDuration(assetId: number): number | null {
+  const row = db.prepare('SELECT duration_ms FROM assets WHERE id = ?').get(assetId) as {
+    duration_ms: number | null
+  }
+  return row.duration_ms
+}
+
 const basePayload = {
   scenes: [{ start_ms: 0, end_ms: 297541 }],
   frames: [],
@@ -59,7 +67,7 @@ describe('视频真实时长', () => {
     const { ingestVideo } = await import('./ingestVideo')
     const result = await ingestVideo({ videoPath: 'source.mp4' })
 
-    expect(db.prepare('SELECT duration_ms FROM assets WHERE id = ?').get(result.assetId).duration_ms).toBe(
+    expect(storedDuration(result.assetId)).toBe(
       297541,
     )
     const { getVideoDetail } = await import('./library')
@@ -72,7 +80,7 @@ describe('视频真实时长', () => {
     const result = await ingestVideo({ videoPath: 'old-service.mp4' })
 
     expect(
-      db.prepare('SELECT duration_ms FROM assets WHERE id = ?').get(result.assetId).duration_ms,
+      storedDuration(result.assetId),
     ).toBeNull()
     const { getVideoDetail } = await import('./library')
     expect(getVideoDetail(result.assetId)?.asset.durationMs).toBeNull()

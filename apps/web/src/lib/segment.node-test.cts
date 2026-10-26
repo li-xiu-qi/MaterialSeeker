@@ -99,6 +99,24 @@ test('触发器同步：新插入的 chunk 自动进索引', () => {
   assert.equal(joined.t, '一只小猫坐在窗台上晒太阳', 'JOIN 主表取回的是原文')
 })
 
+test('触发器同步：更新后旧词失效，新词立即可查', () => {
+  const d = makeOldDb()
+  migrateFtsSegmentation(d)
+  const row = d.prepare('SELECT id FROM chunks ORDER BY id LIMIT 1').get() as { id: number }
+  d.prepare('UPDATE chunks SET text = ? WHERE id = ?').run('一只小狗在阳台上睡觉', row.id)
+  assert.equal(ftsHits(d, '滑板草地'), 0, '更新前的中文词不能残留在索引里')
+  assert.equal(ftsHits(d, '小狗阳台'), 1, '更新后的中文词应立即命中')
+})
+
+test('触发器同步：删除后中文词不再命中，其他行不受影响', () => {
+  const d = makeOldDb()
+  migrateFtsSegmentation(d)
+  const row = d.prepare('SELECT id FROM chunks ORDER BY id LIMIT 1').get() as { id: number }
+  d.prepare('DELETE FROM chunks WHERE id = ?').run(row.id)
+  assert.equal(ftsHits(d, '滑板草地'), 0, '删除行的中文词不能残留')
+  assert.equal(ftsHits(d, 'Paraformer'), 1, '其他行仍在索引里')
+})
+
 test('迁移幂等：第二次空跑不重复重建', () => {
   const d = makeOldDb()
   migrateFtsSegmentation(d)

@@ -31,12 +31,13 @@ export const PASSAGE_INSTRUCTION = 'title: none | text: '
 /** 查询侧（query）：用户的查询。EG2 的 SearchQuery task prefix。 */
 export const QUERY_INSTRUCTION = 'task: search result | query: '
 
-export type Modality = 'text' | 'image'
+export type Modality = 'text' | 'image' | 'audio'
 
 export interface EncodeRequest {
   inputs: Array<
     | { modality: 'text'; text: string; instruction?: string }
     | { modality: 'image'; path: string; instruction?: string }
+    | { modality: 'audio'; path: string; instruction?: string }
   >
 }
 
@@ -91,4 +92,13 @@ export function encodeText(text: string, side: 'passage' | 'query'): Promise<Flo
 
 export function encodeImage(path: string): Promise<Float32Array[]> {
   return encodeBatch({ inputs: [{ modality: 'image', path }] })
+}
+
+/**
+ * 音频文件向量。**不传 instruction**：EG2 的音频范式是 {"audio": path}，
+ * 模型卡示例不带 task-prefix；查询侧的文字仍走 QUERY_INSTRUCTION，两侧在
+ * 同一个向量空间里比对。
+ */
+export function encodeAudio(path: string): Promise<Float32Array[]> {
+  return encodeBatch({ inputs: [{ modality: 'audio', path }] })
 }

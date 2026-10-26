@@ -45,7 +45,7 @@ export const FINISHED_TTL_SECONDS = 120
  *    传数字 120 会被当成非法修饰符而 silently 忽略，窗口变成「永远可见」——
  *    那种失效不报错，只是功能没了。
  */
-export function finishedWindowSql(ttlSeconds: number = FINISHED_TTL_SECONDS): string {
+export function finishedWindowSql(): string {
   return `AND finished_at IS NOT NULL AND finished_at > datetime('now','localtime', ?)`
 }
 

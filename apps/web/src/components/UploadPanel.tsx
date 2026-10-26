@@ -806,7 +806,6 @@ export function UploadPanel({
     ['waiting', 'uploading', 'encoding', 'queued', 'processing'].includes(r.phase),
   )
   const readyRows = rows.filter((r) => r.phase === 'ready')
-  const readyCount = readyRows.length
   const previewRow = rows.find((r) => r.key === previewKey) ?? null
   const editRow = rows.find((r) => r.key === editKey) ?? null
   /**
@@ -819,16 +818,15 @@ export function UploadPanel({
    * 请求失败不阻塞编辑：caption 与 tags 退化成空，用户照常能填。真失败了由保存
    * 那一侧报错，那里才是必须成功的时刻。
    */
-  const meta = useAssetMeta(editRow?.assetId ?? null)
   const doneCount = rows.filter((r) => r.phase === 'done').length
   const errorCount = rows.filter((r) => r.phase === 'error').length
   const overall = rows.length > 0 ? Math.round(rows.reduce((s, r) => s + r.pct, 0) / rows.length) : 0
   const activeName = rows.find((r) => r.phase === 'uploading' || r.phase === 'processing')?.name
 
   return (
-    <section className="mt-6 rounded-lg border border-neutral-800 bg-neutral-900/50 p-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-medium text-neutral-200">入库</h2>
+    <section className="panel mt-4 p-4 sm:p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-base font-medium text-neutral-100">入库</h2>
         <p className="text-xs text-neutral-400">{HINT_BY_KIND[accept]}</p>
       </div>
 
@@ -848,7 +846,7 @@ export function UploadPanel({
           id={`ingest-collection-${accept}`}
           value={targetId}
           onChange={(e) => setTargetId(Number(e.target.value))}
-          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-500"
+          className="min-h-11 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 focus:border-neutral-500"
         >
           {collections.map((c) => (
             <option key={c.id} value={c.id}>
@@ -885,7 +883,8 @@ export function UploadPanel({
           multiple 让一次能选多个，无 JS 的原生提交也吃得住。
         */}
         <label
-          className="mt-3 block cursor-pointer rounded-md border border-dashed border-neutral-700 p-6 text-center transition hover:border-neutral-500 hover:bg-neutral-800/30"
+          data-tour="ingest-dropzone"
+          className="mt-4 block min-h-48 cursor-pointer rounded-xl border border-dashed border-neutral-600 bg-neutral-950/40 p-6 text-center transition hover:border-neutral-400 hover:bg-neutral-900 focus-within:border-neutral-300 focus-within:ring-2 focus-within:ring-neutral-300/40 sm:p-8"
           onDragOver={(e) => {
             // 必须 preventDefault，否则浏览器默认动作是直接在窗口里打开文件
             e.preventDefault()
@@ -912,7 +911,7 @@ export function UploadPanel({
             type="file"
             multiple
             accept={ACCEPT_BY_KIND[accept]}
-            className="hidden"
+            className="sr-only"
             onChange={(e) => {
               // **选完只落在待命区，不传。** 早先是「选完即开始，不用再点按钮」，
               // 那是在拿「少一次点击」换「不能反悔」：误选一个 1.9 GB 的视频，
@@ -943,7 +942,7 @@ export function UploadPanel({
             e.preventDefault()
             void start()
           }}
-          className="mt-3 w-full rounded-md bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-900 disabled:opacity-40"
+          className="btn-primary mt-3 w-full disabled:opacity-40"
         >
           {busy ? '处理中…' : '开始入库'}
         </button>
@@ -974,7 +973,7 @@ export function UploadPanel({
               全部撤掉
             </button>
           </div>
-          <ul className="mt-2.5 grid grid-cols-4 gap-2 sm:grid-cols-6">
+          <ul className="mt-2.5 grid grid-cols-3 gap-2 sm:grid-cols-6">
             {readyRows.map((r) => (
               <li key={r.key} className="group relative">
                 <div className="aspect-square w-full overflow-hidden rounded border border-neutral-800 bg-neutral-900">
@@ -994,7 +993,8 @@ export function UploadPanel({
                   type="button"
                   onClick={() => unstage(r.key)}
                   aria-label={`撤掉 ${r.name}`}
-                  className="absolute right-1 top-1 hidden h-5 w-5 items-center justify-center rounded-full bg-neutral-950/80 text-xs text-neutral-300 hover:bg-red-950 hover:text-red-300 group-hover:flex"
+                  title={`撤掉 ${r.name}`}
+                  className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-950/90 text-sm text-neutral-200 shadow-sm hover:bg-red-950 hover:text-red-300"
                 >
                   ×
                 </button>
@@ -1023,7 +1023,7 @@ export function UploadPanel({
             type="button"
             disabled={batchBusy}
             onClick={() => void analyzeChecked()}
-            className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-900 disabled:opacity-40"
+            className="btn-primary px-3 py-1 text-xs disabled:opacity-40"
           >
             {batchBusy ? batchMsg || '标注中' : `AI 标注这 ${checkedRows.length} 张`}
           </button>
@@ -1050,7 +1050,7 @@ export function UploadPanel({
       {rows.length > 0 && (
         <div className="mt-4 border-t border-neutral-800 pt-3">
           {/* 总览。视频是分钟级，明确告诉用户没卡死、还要等多久 */}
-          <div className="flex items-baseline justify-between text-xs">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs" aria-live="polite">
             <span className="text-neutral-300">
               {doneCount}/{rows.length} 已完成
               {errorCount > 0 && <span className="text-red-400"> · {errorCount} 个失败</span>}
@@ -1062,7 +1062,14 @@ export function UploadPanel({
               </span>
             )}
           </div>
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-neutral-800">
+          <div
+            className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-neutral-800"
+            role="progressbar"
+            aria-label="本批入库总进度"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={overall}
+          >
             <div
               className="h-full rounded-full bg-neutral-200 transition-[width] duration-500"
               style={{ width: `${overall}%` }}
@@ -1072,22 +1079,24 @@ export function UploadPanel({
           <ul className="mt-3 space-y-2">
             {rows.map((r) => (
               <li key={r.key} className="rounded-md border border-neutral-800 bg-neutral-950/50 p-2.5">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {r.phase === 'done' && r.assetId != null && r.kind === 'image' && (
-                    <input
-                      type="checkbox"
-                      checked={checked.has(r.key)}
-                      onChange={(e) => {
-                        setChecked((prev) => {
-                          const next = new Set(prev)
-                          if (e.target.checked) next.add(r.key)
-                          else next.delete(r.key)
-                          return next
-                        })
-                      }}
-                      aria-label={`选择 ${r.name}`}
-                      className="flex-none accent-neutral-100"
-                    />
+                    <label className="inline-flex h-11 w-11 flex-none items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={checked.has(r.key)}
+                        onChange={(e) => {
+                          setChecked((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.add(r.key)
+                            else next.delete(r.key)
+                            return next
+                          })
+                        }}
+                        aria-label={`选择 ${r.name}`}
+                        className="h-4 w-4 accent-neutral-100"
+                      />
+                    </label>
                   )}
                   <span className="flex-none rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-400">
                     {KIND_LABEL[r.kind ?? ''] ?? '文件'}
@@ -1158,7 +1167,14 @@ export function UploadPanel({
                 </div>
 
                 {/* 单文件进度条。上传段与处理段用同一条，宽度由 pct 统一驱动 */}
-                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-neutral-800">
+                <div
+                  className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-neutral-800"
+                  role="progressbar"
+                  aria-label={`${r.name} 入库进度`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={r.pct}
+                >
                   <div
                     className={`h-full rounded-full transition-[width] duration-300 ${
                       r.phase === 'error'
@@ -1249,14 +1265,12 @@ export function UploadPanel({
         多一次请求，那是几十毫秒的事，换来的是不会拿着过期值覆盖别人的修改。
       */}
       {editRow && editRow.assetId != null && editRow.kind != null && (
-        <AssetEditModal
-          open
+        <FreshAssetEditModal
+          key={editRow.key}
           onClose={() => setEditKey(null)}
           assetId={editRow.assetId}
           kind={editRow.kind === 'image' ? 'image' : editRow.kind === 'video' ? 'video' : 'audio'}
           title={editRow.name}
-          caption={meta?.caption ?? ''}
-          tags={meta?.tags ?? []}
           returnFocusTo={editBtn.current}
           onSaved={() => router.refresh()}
         />
@@ -1266,33 +1280,68 @@ export function UploadPanel({
 }
 
 /**
- * 取一条素材的标注与标签。id 为 null 时不发请求。
+ * 每次打开都新建取数状态。关闭时这个包装组件随条件渲染一起卸载，
+ * 所以同一素材再次打开也会先重新请求，再用新响应重建表单，不会复用上次的旧值。
  */
-function useAssetMeta(id: number | null): { caption: string; tags: string[] } | null {
-  const [meta, setMeta] = useState<{ caption: string; tags: string[] } | null>(null)
+function FreshAssetEditModal({
+  assetId,
+  kind,
+  title,
+  onClose,
+  onSaved,
+  returnFocusTo,
+}: {
+  assetId: number
+  kind: 'image' | 'video' | 'audio'
+  title: string
+  onClose: () => void
+  onSaved?: () => void
+  returnFocusTo?: HTMLElement | null
+}) {
+  const meta = useAssetMeta(assetId)
+  return (
+    <AssetEditModal
+      key={meta ? 'ready' : 'pending'}
+      open
+      onClose={onClose}
+      assetId={assetId}
+      kind={kind}
+      title={meta?.title || title}
+      caption={meta?.caption ?? ''}
+      tags={meta?.tags ?? []}
+      returnFocusTo={returnFocusTo}
+      onSaved={onSaved}
+    />
+  )
+}
+
+/** 取一条素材的标题、标注与标签。id 为 null 时不发请求。 */
+function useAssetMeta(id: number | null): { title: string; caption: string; tags: string[] } | null {
+  const [meta, setMeta] = useState<{ id: number; title: string; caption: string; tags: string[] } | null>(null)
   useEffect(() => {
-    if (id == null) {
-      setMeta(null)
-      return
-    }
+    if (id == null) return
     let alive = true
     void (async () => {
       try {
         const r = await fetch(`/api/library/${id}`, { cache: 'no-store' })
         const d = (await r.json()) as {
           ok?: boolean
-          asset?: { caption?: string | null; tags?: string[] }
+          asset?: { title?: string; caption?: string | null; tags?: string[] }
         }
-        if (alive && d.ok) setMeta({ caption: d.asset?.caption ?? '', tags: d.asset?.tags ?? [] })
+        if (alive && d.ok) {
+          setMeta({ id, title: d.asset?.title ?? '', caption: d.asset?.caption ?? '', tags: d.asset?.tags ?? [] })
+        }
       } catch {
-        if (alive) setMeta({ caption: '', tags: [] })
+        if (alive) setMeta({ id, title: '', caption: '', tags: [] })
       }
     })()
     return () => {
       alive = false
     }
   }, [id])
-  return meta
+  return id !== null && meta?.id === id
+    ? { title: meta.title, caption: meta.caption, tags: meta.tags }
+    : null
 }
 
 function PhaseTag({ phase, stage, pct }: { phase: Phase; stage: string; pct: number }) {

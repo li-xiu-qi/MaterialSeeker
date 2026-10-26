@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_RESULT_SHOWN, RESULT_PAGE, resultParams } from './searchPaging'
+import { MAX_RESULT_SHOWN, RESULT_PAGE, resultParams, resultRequestSize, resultWindow } from './searchPaging'
 
 describe('RESULT_PAGE', () => {
   it('是正整数', () => {
@@ -11,6 +11,29 @@ describe('RESULT_PAGE', () => {
     // 一页就吃掉全部上限时，「显示更多」是不可达分支，用户看到的结果
     // 永远只有第一页且没有任何提示
     expect(RESULT_PAGE).toBeLessThan(MAX_RESULT_SHOWN)
+  })
+})
+
+describe('结果翻页探针', () => {
+  it('请求时多取一条，否则永远判断不了是否还有下一页', () => {
+    expect(resultRequestSize(RESULT_PAGE)).toBe(RESULT_PAGE + 1)
+  })
+
+  it('到展示上限后不再放大请求', () => {
+    expect(resultRequestSize(MAX_RESULT_SHOWN)).toBe(MAX_RESULT_SHOWN)
+  })
+
+  it('额外一条只用于判断更多，不混进当前页', () => {
+    const hits = Array.from({ length: RESULT_PAGE + 1 }, (_, i) => i)
+    const page = resultWindow(hits, RESULT_PAGE)
+    expect(page.items).toHaveLength(RESULT_PAGE)
+    expect(page.items).toEqual(hits.slice(0, RESULT_PAGE))
+    expect(page.hasMore).toBe(true)
+  })
+
+  it('刚好一页或已到上限时不显示更多', () => {
+    expect(resultWindow(Array.from({ length: RESULT_PAGE }, (_, i) => i), RESULT_PAGE).hasMore).toBe(false)
+    expect(resultWindow(Array.from({ length: MAX_RESULT_SHOWN }, (_, i) => i), MAX_RESULT_SHOWN).hasMore).toBe(false)
   })
 })
 

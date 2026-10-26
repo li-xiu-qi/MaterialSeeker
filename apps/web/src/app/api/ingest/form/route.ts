@@ -129,7 +129,7 @@ export async function POST(req: Request) {
     let target: string
     try {
       target = await stageFile(file, kind)
-    } catch (e) {
+    } catch {
       failed += 1
       errs.push(`${file.name}: 落盘失败`)
       continue

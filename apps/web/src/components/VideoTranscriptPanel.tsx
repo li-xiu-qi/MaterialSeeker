@@ -57,21 +57,18 @@ export function VideoTranscriptPanel({
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const scrollRef = useRef<HTMLOListElement | null>(null)
   const [activeMs, setActiveMs] = useState<number | null>(currentMs)
-  const [visibleCount, setVisibleCount] = useState(30)
+  const [visibleCount, setVisibleCount] = useState(() => {
+    if (currentMs === null) return 30
+    const index = sentences.findIndex((s) => s.startMs === currentMs)
+    return index >= 0 ? Math.max(30, index + 1) : 30
+  })
   const visibleSentences = sentences.slice(0, visibleCount)
   const transcriptEndMs = sentences.length > 0 ? sentences[sentences.length - 1].endMs : null
-
-  // 换素材时重置分批加载，避免上一篇的展开状态残留到下一篇。
-  useEffect(() => {
-    setVisibleCount(30)
-  }, [sentences])
 
   // 地址栏带 t= 说明这次进入就带定位：若目标句在当前批次之外，先扩到那一批，
   // 再滚动过去。否则「全部懒加载」会把深链定位弄丢。
   useEffect(() => {
     if (currentMs === null) return
-    const index = sentences.findIndex((s) => s.startMs === currentMs)
-    if (index >= 0) setVisibleCount((v) => Math.max(v, index + 1))
     const timer = window.setTimeout(() => {
       const el = document.getElementById(`s-${currentMs}`)
       el?.scrollIntoView({ block: 'center' })
@@ -89,6 +86,10 @@ export function VideoTranscriptPanel({
     if (!v) return
     e.preventDefault()
     v.currentTime = ms / 1000
+    if (kind === 'video' && window.matchMedia('(max-width: 1279px)').matches) {
+      const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      v.scrollIntoView({ block: 'center', behavior: reduced ? 'instant' : 'smooth' })
+    }
     v.play().catch(() => {
       /* 自动播放被浏览器拦下时静默，用户手动点播放即可 */
     })
@@ -124,6 +125,7 @@ export function VideoTranscriptPanel({
           src={seekSrc ?? undefined}
           controls
           preload="metadata"
+          playsInline
           className="absolute inset-0 h-full w-full object-contain"
         />
       </div>
@@ -181,7 +183,9 @@ export function VideoTranscriptPanel({
                 <li key={`${s.startMs}-${i}`}>
                   <div
                     className={`group flex items-baseline gap-2 rounded-md px-2 py-1.5 transition ${
-                      active ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-300 hover:bg-neutral-900'
+                      active
+                        ? 'bg-neutral-800/70 text-neutral-100 shadow-[inset_2px_0_0_var(--color-neutral-400)]'
+                        : 'text-neutral-300 hover:bg-neutral-900'
                     }`}
                   >
                     <a
@@ -190,11 +194,11 @@ export function VideoTranscriptPanel({
                       onClick={(e) => seek(s.startMs, e)}
                       aria-current={active ? 'true' : undefined}
                       title={`跳转到 ${fmtMs(s.startMs)}`}
-                      className="flex min-w-0 flex-1 items-baseline gap-3 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
+                      className="flex min-h-11 min-w-0 flex-1 items-baseline gap-3 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-amber-300/70"
                     >
                       <span
                         className={`w-12 flex-none whitespace-nowrap text-right text-xs tabular-nums ${
-                          active ? 'text-amber-300' : 'text-neutral-400'
+                          active ? 'text-neutral-200' : 'text-neutral-400'
                         }`}
                       >
                         {fmtMs(s.startMs)}
@@ -204,7 +208,7 @@ export function VideoTranscriptPanel({
                     <Link
                       href={`/?q=${encodeURIComponent(s.text)}&lib=${collectionId}`}
                       title={`检索这句话：${s.text}`}
-                      className="flex-none rounded-sm px-1 text-xs text-neutral-400 opacity-100 outline-none transition hover:text-neutral-200 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-amber-300/70 group-focus-within:opacity-100 xl:opacity-0 xl:group-hover:opacity-100 xl:group-focus-within:opacity-100 xl:focus-visible:opacity-100"
+                      className="inline-flex min-h-11 flex-none items-center rounded-sm px-1 text-xs text-neutral-400 opacity-100 outline-none transition hover:text-neutral-200 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-amber-300/70 group-focus-within:opacity-100 xl:opacity-0 xl:group-hover:opacity-100 xl:group-focus-within:opacity-100 xl:focus-visible:opacity-100"
                     >
                       检索
                     </Link>

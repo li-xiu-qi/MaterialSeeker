@@ -17,13 +17,14 @@ export interface BackfillStats {
   frameCaptions: number
   imageImages: number
   imageCaptions: number
+  audioFiles: number
   batches: number
 }
 
 interface FillTarget {
-  table: 'text_notes' | 'chunks' | 'frames' | 'images'
+  table: 'text_notes' | 'chunks' | 'frames' | 'images' | 'audio_files'
   column: 'embedding' | 'caption_embedding'
-  rows: Array<{ id: number; text?: string; path?: string; modality: 'text' | 'image' }>
+  rows: Array<{ id: number; text?: string; path?: string; modality: 'text' | 'image' | 'audio' }>
 }
 
 function clampBatchSize(value: number | undefined): number {
@@ -54,11 +55,11 @@ async function fill(target: FillTarget, batchSize: number): Promise<{ updated: n
   let batches = 0
   for (let offset = 0; offset < target.rows.length; offset += batchSize) {
     const batch = target.rows.slice(offset, offset + batchSize)
-    const inputs: EncodeRequest['inputs'] = batch.map((row) =>
-      row.modality === 'image'
-        ? { modality: 'image', path: row.path! }
-        : { modality: 'text', text: row.text!, instruction: PASSAGE_INSTRUCTION },
-    )
+    const inputs: EncodeRequest['inputs'] = batch.map((row) => {
+      if (row.modality === 'image') return { modality: 'image', path: row.path! }
+      if (row.modality === 'audio') return { modality: 'audio', path: row.path! }
+      return { modality: 'text', text: row.text!, instruction: PASSAGE_INSTRUCTION }
+    })
     const vectors = await encodeBatch({ inputs })
     if (vectors.length !== batch.length) {
       throw new Error(`encode mismatch: ${vectors.length} vectors for ${batch.length} rows`)
@@ -167,6 +168,19 @@ export async function backfillEmbeddings(opts: { batchSize?: number } = {}): Pro
     },
     batchSize,
   )
+  const audioFiles = await fill(
+    {
+      table: 'audio_files',
+      column: 'embedding',
+      rows: db
+        .prepare(
+          "SELECT id, file_path AS path FROM audio_files WHERE embedding IS NULL AND file_path IS NOT NULL AND trim(file_path) != '' ORDER BY id",
+        )
+        .all()
+        .map((r) => ({ ...(r as { id: number; path: string }), modality: 'audio' as const })),
+    },
+    batchSize,
+  )
 
   return {
     textNotes: textNotes.updated,
@@ -175,12 +189,14 @@ export async function backfillEmbeddings(opts: { batchSize?: number } = {}): Pro
     frameCaptions: frameCaptions.updated,
     imageImages: imageImages.updated,
     imageCaptions: imageCaptions.updated,
+    audioFiles: audioFiles.updated,
     batches:
       textNotes.batches +
       chunks.batches +
       frameImages.batches +
       frameCaptions.batches +
       imageImages.batches +
-      imageCaptions.batches,
+      imageCaptions.batches +
+      audioFiles.batches,
   }
 }

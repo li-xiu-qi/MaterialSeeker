@@ -83,8 +83,9 @@ export default async function IngestPage({
   const total = Number(count) || imgN + vidN + audN
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <h1 className="text-2xl font-semibold">入库{currentKind !== 'text' ? '' : ''}</h1>
+    <div className="mx-auto w-full max-w-6xl">
+      <p className="eyebrow">添加新素材</p>
+      <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">把素材放进来</h1>
       <p className="mt-1 text-sm text-neutral-400">
         当前入库到「{current ? current.name : '默认库'}」
       </p>
@@ -159,8 +160,8 @@ export default async function IngestPage({
         **选中态进 URL（?k=audio）**：刷新与分享链接落在同一个模态上，且无 JS
         时这四个选项是普通链接，照样能切。
       */}
-      <nav className="mt-6" aria-label="入库类型">
-        <ul className="flex flex-wrap gap-2">
+      <nav className="mt-5" aria-label="入库类型">
+        <ul className="flex flex-nowrap gap-2 overflow-x-auto pb-1">
           {INGEST_TABS.map((tab) => {
             const active = tab.kind === currentKind
             return (
@@ -168,9 +169,9 @@ export default async function IngestPage({
                 <Link
                   href={`/ingest?lib=${currentId}&k=${tab.kind}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`block rounded-md px-4 py-2 text-sm transition ${
+                  className={`flex min-h-11 items-center justify-center rounded-lg px-4 py-2 text-sm transition ${
                     active
-                      ? 'bg-neutral-100 font-medium text-neutral-900'
+                      ? 'border border-neutral-600 bg-neutral-800 font-medium text-neutral-100'
                       : 'border border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-neutral-100'
                   }`}
                 >
@@ -214,13 +215,10 @@ export default async function IngestPage({
           两种心智模型挤在同一块区域。
         */}
         <div hidden={currentKind !== 'text'}>
-          <TextIngestForm
-            collections={collections.map((c) => ({ id: c.id, name: c.name }))}
-            currentCollectionId={currentId}
-          />
+          <TextIngestForm currentCollectionId={currentId} />
         </div>
+      </div>
     </div>
-  </div>
-)
+  )
 }
 

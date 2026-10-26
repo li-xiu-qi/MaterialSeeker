@@ -53,7 +53,7 @@ export default async function ImageDetailPage({
         描述一改就重编码（见 updateAssetMeta），否则库里存的是旧向量，表现为
         「描述已更新但按新描述搜不到」，这种失效不报错，只在检索时显现。
       */}
-      <details className="mt-4 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+      <details className="mt-4 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2" data-tour="asset-edit">
         <summary className="cursor-pointer text-xs text-neutral-400 marker:content-none hover:text-neutral-200">
           编辑标题与画面描述
         </summary>

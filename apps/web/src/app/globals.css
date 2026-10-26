@@ -1,16 +1,176 @@
 @import "tailwindcss";
 
-/**
- * 主内容区的滚动条。**暗色页面上 Chrome 默认的 overlay 滚动条淡到几乎看不见。**
- *
- * 症状具体：页面明显还有内容在下面，用户却报告「没法滚动」。有一部分不是滚不动，
- * 是没有任何视觉线索告诉他这里可以滚——深色背景上那条半透明细条与背景对比度极低，
- * 不鼠标悬停上去根本不出现。滚动条是「此处有更多内容」唯一的常驻提示，工作台类
- * 页面不能没有它。
- *
- * 只给 main 加，不给侧边栏与内部小列表加：侧边栏常驻不滚，逐字稿等小列表的
- * 滚动条只会是噪音。
- */
+@theme {
+  --font-sans: "Segoe UI Variable", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+}
+
+:root {
+  --focus-ring: var(--color-neutral-300);
+  --accent-ink: var(--color-neutral-900);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background: var(--color-neutral-950);
+  }
+
+  body {
+    font-family: var(--font-sans);
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  summary {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgb(245 245 245 / 12%);
+  }
+
+  ::selection {
+    background: var(--color-neutral-700);
+    color: var(--color-neutral-50);
+  }
+}
+
+@layer components {
+  .panel,
+  .search-panel {
+    border: 1px solid var(--color-neutral-800);
+    border-radius: 12px;
+    background: var(--color-neutral-900);
+  }
+
+  .search-panel {
+    padding: 16px;
+  }
+
+  .asset-card {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--color-neutral-800);
+    border-radius: 12px;
+    background: var(--color-neutral-900);
+    transition: border-color 180ms ease, transform 180ms ease;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    padding: 0 16px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .btn-primary {
+    border: 1px solid var(--color-neutral-100);
+    background: var(--color-neutral-100);
+    color: var(--color-neutral-900);
+  }
+
+  .btn-primary:hover {
+    border-color: var(--color-neutral-50);
+    background: var(--color-neutral-50);
+  }
+
+  .btn-secondary {
+    border: 1px solid var(--color-neutral-800);
+    background: var(--color-neutral-900);
+    color: var(--color-neutral-100);
+  }
+
+  .btn-secondary:hover {
+    border-color: var(--color-neutral-600);
+  }
+
+  .filter-chip {
+    display: inline-flex;
+    min-height: 36px;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-neutral-800);
+    border-radius: 999px;
+    padding: 0 12px;
+    color: var(--color-neutral-400);
+    font-size: 12px;
+  }
+
+  .filter-chip:hover {
+    border-color: var(--color-neutral-600);
+    color: var(--color-neutral-100);
+  }
+
+  .filter-chip-active {
+    border-color: var(--color-neutral-600);
+    background: var(--color-neutral-800);
+    color: var(--color-neutral-100);
+  }
+
+  .eyebrow {
+    color: var(--color-neutral-500);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+  }
+
+  .timecode {
+    border-radius: 5px;
+    background: rgb(10 10 10 / 88%);
+    color: var(--color-neutral-200);
+    font-family: ui-monospace, "Cascadia Mono", monospace;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tour-target {
+    outline: 3px solid var(--color-neutral-100) !important;
+    outline-offset: 4px !important;
+    scroll-margin-block: 24px;
+  }
+
+  .skip-link {
+    position: fixed;
+    z-index: 60;
+    left: 16px;
+    top: 8px;
+    transform: translateY(-160%);
+    border-radius: 8px;
+    background: var(--color-neutral-100);
+    padding: 8px 12px;
+    color: var(--color-neutral-900);
+  }
+
+  .skip-link:focus {
+    transform: none;
+  }
+}
+
+@layer utilities {
+  :where(a, button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid var(--focus-ring) !important;
+    outline-offset: 3px !important;
+  }
+}
+
+main {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral-700) transparent;
+}
 
 main::-webkit-scrollbar {
   width: 12px;
@@ -21,18 +181,95 @@ main::-webkit-scrollbar-track {
 }
 
 main::-webkit-scrollbar-thumb {
-  background-color: #3f3f3f;
   border: 3px solid transparent;
   border-radius: 9999px;
   background-clip: content-box;
+  background-color: var(--color-neutral-700);
 }
 
 main::-webkit-scrollbar-thumb:hover {
-  background-color: #5a5a5a;
+  background-color: var(--color-neutral-500);
 }
 
-/* Firefox 走另一套属性 */
-main {
-  scrollbar-width: thin;
-  scrollbar-color: #3f3f3f transparent;
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .asset-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--color-neutral-600);
+  }
+}
+
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+
+  button,
+  summary {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .search-panel {
+    padding: 12px;
+  }
+
+  .filter-chip {
+    min-height: 40px;
+    padding: 0 14px;
+  }
+}
+
+@media (max-width: 639px) {
+  .recent-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .recent-asset:nth-child(n + 5) {
+    display: none;
+  }
+
+  .recent-asset-link {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .recent-asset-link > img,
+  .recent-asset-link > div:first-child {
+    width: 100%;
+    height: 72px;
+    aspect-ratio: auto;
+  }
+
+  .recent-asset-link > div:last-child {
+    padding: 8px 10px;
+  }
+
+  .library-media-link {
+    display: grid !important;
+    grid-template-columns: 112px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+
+  .library-media-link > img,
+  .library-media-link > div:first-child {
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 4 / 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

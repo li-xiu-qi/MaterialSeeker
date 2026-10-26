@@ -1,139 +1,158 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { type MouseEvent, type ReactNode, useCallback, useState } from 'react'
+import { usePathname, useSearchParams } from 'next/navigation'
+import { CircleHelp, LibraryBig, Search, Upload } from 'lucide-react'
 import { BrandMark } from './BrandMark'
-
-/**
- * 应用外壳：左侧常驻导航 + 右侧主区。
- *
- * 三个入口是平级功能（搜索是「找」、入库是「放」、素材库是「管」），不是父子关系，
- * 所以放边栏而不是塞进某个页面的页首。选边栏的三个实际理由：
- * 一，回检索必须一步可达，素材库有一百多张图，返回链接埋在列表末尾等于没有；
- * 二，顶栏页签会把「去另一边」降级成次级操作；
- * 三，后面还会长第四个入口，边栏不用为此重构。
- *
- * **侧边栏只放用户主动发起的入口。** 检索范围（在哪个库里搜）的选择器不放这里：
- * 它是页面级参数，与「去哪个页面」不同级，由各页面自己的 CollectionScope 呈现。
- * 导航只负责在跳转时保留当前 lib，避免搜索、入库、素材库之间切换时悄悄回到默认库。
- * 入库页同样从 lib 读取目标库，因此三个入口都保留这个参数。
- *
- * **后台任务队列也不放这里。** 它在导航侧边栏挂过一段时间，理由是「任务进度只
- * 存在在发起它的那个页面，用户切走就看不见」。这个理由不成立：真实的等待发生
- * 在入库页，人在那里等，进度左栏就有；切走页面是少数情况，为少数情况把一块
- * 与导航无关的内容常驻在全局导航里，代价是每一次打开这个应用都要看见它，而它
- * 对检索页与素材库页毫无意义。层级上任务进度属于入库页的上下文，不属于导航。
- * 现已移进入库页自己的右侧栏。
- *
- * 本文件是客户端组件：用 usePathname 高亮当前项，挂载后从 location 保留素材库范围。
- * 三个主入口用原生链接做整页导航，不把范围保留与页面切换依赖在 Next.js 客户端路由器上。
- * effect 在首帧后同步当前 lib，也不会造成 SSR 与 hydration 的链接不一致。
- */
+import { OnboardingTour } from './OnboardingTour'
 
 const NAV = [
-  { href: '/', label: '搜索', hint: '按内容找素材' },
-  { href: '/ingest', label: '入库', hint: '添加图片、视频、音频、文本' },
-  { href: '/library', label: '素材库', hint: '浏览与管理' },
+  { href: '/', label: '搜索', hint: '按内容找素材', icon: Search },
+  { href: '/ingest', label: '入库', hint: '添加图片、视频、音频、文本', icon: Upload },
+  { href: '/library', label: '素材库', hint: '浏览与管理', icon: LibraryBig },
 ]
+
+/** hydration 前的首点也保留范围：以点击当下的 URL 为准，不依赖 effect 已跑完。 */
+function preserveScopeOnClick(event: MouseEvent<HTMLAnchorElement>) {
+  const scope = new URLSearchParams(window.location.search).get('lib')
+  if (!scope) return
+  const target = new URL(event.currentTarget.href)
+  target.searchParams.set('lib', scope)
+  event.currentTarget.href = `${target.pathname}${target.search}`
+}
 
 function NavLinks({
   pathname,
   collectionScope,
+  mobile = false,
 }: {
   pathname: string
   collectionScope: string | null
+  mobile?: boolean
 }) {
   return NAV.map((item) => {
-    // 前缀匹配，/library 与 /ingest 下的子页也要高亮对应项
-    const active =
-      item.href === '/'
-        ? pathname === '/'
-        : pathname === item.href || pathname.startsWith(`${item.href}/`)
+    const active = item.href === '/'
+      ? pathname === '/'
+      : pathname === item.href || pathname.startsWith(`${item.href}/`)
     const href = collectionScope
       ? `${item.href}?lib=${encodeURIComponent(collectionScope)}`
       : item.href
+    const Icon = item.icon
+
+    if (mobile) {
+      return (
+        <a
+          key={item.href}
+          href={href}
+          aria-current={active ? 'page' : undefined}
+          title={`前往${item.label}`}
+          onClick={preserveScopeOnClick}
+          className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-lg px-1 text-[11px] transition ${
+            active ? 'bg-neutral-900 text-neutral-100' : 'text-neutral-400 hover:text-neutral-100'
+          }`}
+        >
+          <Icon className="h-5 w-5" aria-hidden="true" />
+          <span>{item.label}</span>
+        </a>
+      )
+    }
+
     return (
       <a
         key={item.href}
         href={href}
-        className={`block rounded-md px-3 py-2 text-sm transition ${
+        aria-current={active ? 'page' : undefined}
+        title={`前往${item.label}`}
+        onClick={preserveScopeOnClick}
+        className={`flex min-h-[60px] items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
           active
-            ? 'bg-neutral-100 font-medium text-neutral-900'
-            : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100'
+            ? 'border-neutral-800 bg-neutral-900 text-neutral-100'
+            : 'border-transparent text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100'
         }`}
       >
-        {item.label}
-        <span className="mt-0.5 block text-xs text-neutral-400">{item.hint}</span>
+        <Icon
+          className={`h-5 w-5 flex-none ${active ? 'text-neutral-100' : 'text-neutral-400'}`}
+          aria-hidden="true"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">{item.label}</span>
+          <span className="mt-0.5 block truncate text-[11px] text-neutral-400">{item.hint}</span>
+        </span>
       </a>
     )
   })
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+/** 桌面常驻侧栏，手机底部三入口；页面级素材范围仍由 URL 原样保留。 */
+export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
-  const [collectionScope, setCollectionScope] = useState<string | null>(null)
-
-  useEffect(() => {
-    const syncCollectionScope = () => {
-      const next = new URLSearchParams(window.location.search).get('lib')
-      setCollectionScope((current) => (current === next ? current : next))
-    }
-    syncCollectionScope()
-    window.addEventListener('popstate', syncCollectionScope)
-    return () => window.removeEventListener('popstate', syncCollectionScope)
-  }, [pathname])
+  const collectionScope = useSearchParams().get('lib')
+  const [guideOpen, setGuideOpen] = useState(false)
+  const closeGuide = useCallback(() => setGuideOpen(false), [])
 
   return (
-    <div className="flex min-h-screen">
-      {/*
-        **刻意不加 overflow-y-auto。**
+    <div className="min-h-screen md:flex">
+      <a href="#main-content" className="skip-link">跳到主要内容</a>
 
-        曾经加过，理由是「fixed inset-y-0 的高度被钉在视口上，队列条目多起来会
-        被裁死且自身滚不动」。实测发现这一下有反效果，而且是更糟的那一种：
-        `overflow: auto` 会让这个容器成为 scroll chain 的边界。内容不超高时它
-        自己滚不了，于是鼠标停在它上面拨滚轮时，滚轮被消费在这里——页面也不滚，
-        表现就是「拨滚轮完全不动」。而用户刚刚点过侧边栏导航，鼠标往往还停在
-        这个区域，命中率很高。用户报过这个现象。
-
-        两害相权取其轻：保持 overflow 默认值，让它不是滚动目标，滚轮正常冒泡到
-        document；代价是队列条目极端多时靠下的部分看不到。那个代价有兜底——
-        队列面板底部有「去入库页看详情」链接，入库页能看全部任务。
-      */}
-      <aside className="fixed inset-y-0 left-0 flex w-60 flex-none flex-col border-r border-neutral-800 bg-neutral-950 px-4 py-6">
+      <aside className="hidden md:fixed md:inset-y-0 md:left-0 md:flex md:w-56 md:flex-none md:flex-col md:border-r md:border-neutral-800 md:bg-neutral-950 md:px-4 md:py-7">
         <div className="flex items-center gap-2.5 px-2">
-          <BrandMark size={28} />
+          <BrandMark size={32} />
           <div className="min-w-0">
             <p className="truncate text-base font-semibold text-neutral-100">素材搜索</p>
-            <p className="mt-0.5 truncate text-xs text-neutral-400">多模态内容搜索工作台</p>
+            <p className="mt-0.5 truncate text-[11px] text-neutral-400">MaterialSeeker</p>
           </div>
         </div>
-
-        <nav className="mt-6 space-y-1">
+        <nav className="mt-8 space-y-1.5" aria-label="主导航">
           <NavLinks pathname={pathname} collectionScope={collectionScope} />
         </nav>
-
+        <button
+          type="button"
+          onClick={() => setGuideOpen(true)}
+          title="打开分步使用引导"
+          data-tour="open-onboarding"
+          className="mt-4 flex min-h-11 items-center gap-2 rounded-lg px-3 text-left text-xs text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+        >
+          <CircleHelp className="h-4 w-4" aria-hidden="true" />
+          使用引导
+        </button>
+        <p className="mt-auto px-3 text-[11px] text-neutral-500">本地素材，持续复用</p>
       </aside>
 
-      {/*
-        **主内容区自己滚，侧边栏钉死不动。**
-
-        原来是整页（document）滚、侧边栏靠 fixed 留在原处。那样在素材库这种长页面
-        上出过反复修不好的问题：用户报「拨滚轮页面完全不动」，而自动化环境测同一条
-        URL 文档高 5083px、可滚 4.8 屏——滚得到与滚不到取决于环境里说不清的若干
-        因素（原生 select 吞滚轮、overflow 容器成为 scroll chain 边界等），逐个堵
-        漏堵不干净。
-
-        改成主区独立滚动后，能否滚只取决于这一层容器自己，不再依赖整页滚动是否
-        通：h-screen 把高度钉在视口上，overflow-y-auto 由它承担滚动。侧边栏本来
-        就是 fixed，两者的职责从此不重叠。工作台类应用（侧边栏常驻、内容区独立滚）
-        也是更常见的形态。
-
-        滚动条样式见 globals.css：暗色页面上 Chrome 默认的 overlay 滚动条很淡，
-        几乎看不见，而它是「这里还有内容」的唯一提示。
-      */}
-      <main className="ml-60 h-screen min-w-0 flex-1 overflow-y-auto overscroll-contain px-8 py-10">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="h-screen min-w-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24 pt-4 sm:px-6 md:ml-56 md:px-8 md:py-8 lg:px-10"
+      >
+        <div className="mb-5 flex items-center justify-between gap-3 md:hidden">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <BrandMark size={28} />
+            <div>
+              <p className="text-sm font-semibold text-neutral-100">素材搜索</p>
+              <p className="text-[10px] text-neutral-400">MaterialSeeker</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setGuideOpen(true)}
+            title="打开分步使用引导"
+            data-tour="open-onboarding"
+            className="inline-flex min-h-11 flex-none items-center gap-1.5 rounded-lg border border-neutral-800 px-3 text-xs text-neutral-300 hover:border-neutral-600 hover:text-neutral-100"
+          >
+            <CircleHelp className="h-4 w-4" aria-hidden="true" />
+            使用引导
+          </button>
+        </div>
         {children}
       </main>
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-neutral-800 bg-neutral-950/95 p-2 backdrop-blur md:hidden"
+        aria-label="移动端主导航"
+        style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+      >
+        <NavLinks pathname={pathname} collectionScope={collectionScope} mobile />
+      </nav>
+      {guideOpen && <OnboardingTour onClose={closeGuide} />}
     </div>
   )
 }

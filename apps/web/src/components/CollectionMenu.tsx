@@ -1,7 +1,8 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useRef, useState } from "react";
+import { ModalShell } from "./ModalShell";
 
 /**
  * 素材库管理菜单。**一个 ⋯ 按钮，点开是下拉，只作用于当前库。**
@@ -61,17 +62,6 @@ export function CollectionMenu({
   // 「删除这个库」要先弹模态框，从模态框确认过来的要放行真提交。不靠
   // 「临时摘掉 onSubmit」来区分：那个处理器是 JS 路径唯一的入口。
   const confirmedRef = useRef(false);
-
-  // Esc 关确认框。用 keydown 而不是在遮罩上挂 onClick：后者点在框内也会
-  // 关（除非再判一层 target），而 Esc 的语义本来就是「取消这次操作」。
-  useEffect(() => {
-    if (confirming === null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setConfirming(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [confirming]);
 
   return (
     <>
@@ -188,19 +178,8 @@ export function CollectionMenu({
       「文件还在、只是之后搜不到」这个后果，句子不短。
     */}
       {confirming !== null && collectionName && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          onMouseDown={(e) => {
-            // 点遮罩关掉。判 e.target === e.currentTarget 才不会点在框内也关。
-            if (e.target === e.currentTarget) setConfirming(null);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="删除素材库确认"
-            className="w-full max-w-md rounded-lg border border-neutral-700 bg-neutral-950 p-5"
-          >
+        <ModalShell onClose={() => setConfirming(null)} label="删除素材库确认">
+          <div>
             <h3 className="text-sm font-medium text-neutral-100">
               删除素材库「{collectionName}」？
             </h3>
@@ -243,7 +222,7 @@ export function CollectionMenu({
               </button>
             </div>
           </div>
-        </div>
+        </ModalShell>
       )}
     </>
   );

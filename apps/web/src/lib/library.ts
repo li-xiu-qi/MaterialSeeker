@@ -30,7 +30,6 @@ export { libraryWhere, MAX_PAGE } from './libraryFilter'
  * 相似邻居是全表余弦：库里几百张图的量级下这样最省事，真到上万再谈 ANN。
  */
 
-const DIM = 1024
 const NEIGHBOURS = 8
 
 export interface ImageDetail {

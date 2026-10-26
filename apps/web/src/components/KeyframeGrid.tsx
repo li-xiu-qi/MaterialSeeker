@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { fmtMs } from '@/lib/format'
 
 interface Keyframe {
@@ -15,10 +15,6 @@ interface Keyframe {
  */
 export function KeyframeGrid({ frames }: { frames: Keyframe[] }) {
   const [count, setCount] = useState(4)
-
-  useEffect(() => {
-    setCount(4)
-  }, [frames])
 
   const shown = Math.min(count, frames.length)
   const remaining = frames.length - shown

@@ -84,7 +84,7 @@ export function CollectionScope({
           name="lib"
           defaultValue={currentId === ALL ? 'all' : String(currentId)}
           aria-label={label}
-          className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none focus:border-neutral-500"
+          className="min-h-11 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-200 focus:border-neutral-500"
         >
           <option value="all">全部库</option>
           {collections.map((c) => (
@@ -95,7 +95,8 @@ export function CollectionScope({
         </ScrollSafeSelect>
         <button
           type="submit"
-          className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+          title="切换到这个素材库"
+          className="btn-secondary px-3 py-1 text-xs"
         >
           切换
         </button>
@@ -124,7 +125,7 @@ export function CollectionScope({
           />
           <button
             type="submit"
-            className="w-full rounded bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-900"
+            className="btn-primary w-full px-3 py-1 text-xs"
           >
             创建
           </button>

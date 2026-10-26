@@ -142,11 +142,15 @@ function migrateKinds(d: Database.Database) {
 }
 
 /**
- * 音频文件的落库表。**只有文件路径与时长**，其余全部复用视频那一套：
+ * 音频文件的落库表。**文件路径、时长与音频向量**，其余全部复用视频那一套：
  * transcripts（全文）、transcript_sentences（全片句流）、chunks + sentences
  * （检索与句级定位）。音频没有「帧」这个中间层，也不需要——它的画面内容是零。
  *
- * 新表用 CREATE TABLE IF NOT EXISTS，这一笔不用重建父表，没有数据风险。
+ * 音频向量是整条音频一个向量，不是逐字稿向量的替代品：它让文字查询能直接
+ * 匹配声音内容（语音、音效、音乐形态），转写向量仍然负责「按语句意思找」。
+ *
+ * 新表用 CREATE TABLE IF NOT EXISTS，老库用 ALTER 补 embedding 列。补列是
+ * 幂等的：PRAGMA 查到才有必要 ALTER，不会重复加。
  */
 function initAudioFiles(d: Database.Database) {
   d.exec(`
@@ -154,10 +158,15 @@ function initAudioFiles(d: Database.Database) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
       file_path TEXT NOT NULL,
-      duration_ms INTEGER
+      duration_ms INTEGER,
+      embedding BLOB
     );
     CREATE INDEX IF NOT EXISTS idx_audio_asset ON audio_files(asset_id);
   `)
+  const cols = d.prepare('PRAGMA table_info(audio_files)').all() as Array<{ name: string }>
+  if (!cols.some((c) => c.name === 'embedding')) {
+    d.exec('ALTER TABLE audio_files ADD COLUMN embedding BLOB')
+  }
 }
 
 function migrateCollections(d: Database.Database) {
@@ -309,10 +318,10 @@ function initSchema(d: Database.Database) {
       INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
     END;
     CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
-      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, seg_zh(old.text));
     END;
     CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
-      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, seg_zh(old.text));
       INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
     END;
   `)
@@ -323,7 +332,8 @@ function initSchema(d: Database.Database) {
  *
  * **CREATE TRIGGER IF NOT EXISTS 对已存在的旧触发器无效**：名字相同就跳过，
  * 所以旧库（触发器里还是裸 new.text）不会因为改了上面的 DDL 而更新。判据取
- * sqlite_master 里 chunks_ai 的定义含不含 seg_zh，不含才是旧版。
+ * sqlite_master 里三个触发器是否都用 seg_zh。更新与删除也必须按旧文本的分词结果
+ * 删除索引项，否则中文旧词会残留；只看 INSERT 触发器会漏掉这条。
  *
  * **重建不走 FTS5 的 'rebuild' 命令**：external content 的 rebuild 从 content
  * 表重新取原列写进索引，取的是原文不是 seg_zh(text)，重建完索引里仍旧是未分词
@@ -332,10 +342,15 @@ function initSchema(d: Database.Database) {
  * 幂等：第二次启动时判据已满足，整个函数空跑。
  */
 export function migrateFtsSegmentation(d: Database.Database) {
-  const row = d
-    .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'chunks_ai'")
-    .get() as { sql: string | null } | undefined
-  if (!row?.sql || row.sql.includes('seg_zh')) return
+  const rows = d
+    .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND name IN ('chunks_ai', 'chunks_ad', 'chunks_au')")
+    .all() as Array<{ name: string; sql: string | null }>
+  const sqlByName = new Map(rows.map((row) => [row.name, row.sql ?? '']))
+  const current =
+    sqlByName.get('chunks_ai')?.includes('seg_zh(new.text)') &&
+    sqlByName.get('chunks_ad')?.includes('seg_zh(old.text)') &&
+    sqlByName.get('chunks_au')?.includes('seg_zh(old.text)')
+  if (current) return
 
   const before = d.prepare('SELECT COUNT(*) AS n FROM chunks_fts').get() as { n: number }
   d.exec(`
@@ -346,10 +361,10 @@ export function migrateFtsSegmentation(d: Database.Database) {
       INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
     END;
     CREATE TRIGGER chunks_ad AFTER DELETE ON chunks BEGIN
-      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, seg_zh(old.text));
     END;
     CREATE TRIGGER chunks_au AFTER UPDATE ON chunks BEGIN
-      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, seg_zh(old.text));
       INSERT INTO chunks_fts(rowid, text) VALUES (new.id, seg_zh(new.text));
     END;
   `)

@@ -65,6 +65,7 @@ const AUDIO_STAGE_ORDER: AudioIngestStage[] = [
   'queued',
   'prepare',
   'transcribe',
+  'audio-encode',
   'text-encode',
   'db',
   'done',
@@ -74,19 +75,21 @@ const AUDIO_STAGE_ORDER: AudioIngestStage[] = [
 const AUDIO_STAGE_AT: Record<AudioIngestStage, number> = {
   queued: 0,
   prepare: 5,
-  transcribe: 70,
-  'text-encode': 90,
-  db: 96,
+  transcribe: 60,
+  // 音频文件向量与转写文本向量是两次独立推理，各占一段；不给 0 会让进度条
+  // 从 transcribe 直接跳到 text-encode，看不出中间还在编码声音内容。
+  'audio-encode': 80,
+  'text-encode': 92,
+  db: 97,
   done: 100,
 }
 
-export function audioStageToPercent(s: AudioIngestStage, sub?: AudioStageSub): number {
+export function audioStageToPercent(s: AudioIngestStage, _sub?: AudioStageSub): number {
   const idx = AUDIO_STAGE_ORDER.indexOf(s)
   if (idx < 0) return 0
   const base = AUDIO_STAGE_AT[s]
   const next = AUDIO_STAGE_ORDER[idx + 1]
   if (!next || s === 'done') return base
-  const span = AUDIO_STAGE_AT[next] - base
   // 转写阶段没有 done/total 可插值（FunASR 一次 generate 跑完才返回），
   // 所以给 0  fractional，进度条停在 transcribe 起点直到它真的结束。
   return Math.round(base)

@@ -33,7 +33,9 @@ export function ScrollSafeSelect({
         // 拦下「改选项」，改为滚页面。距离照搬，用户拨多少滚多少，
         // 不放大也不加惯性，避免和触控板的连续事件叠成抽搐。
         e.preventDefault()
-        window.scrollBy({ top: e.deltaY, behavior: 'instant' })
+        const main = document.querySelector('main')
+        if (main) main.scrollBy({ top: e.deltaY, behavior: 'instant' })
+        else window.scrollBy({ top: e.deltaY, behavior: 'instant' })
       }}
     />
   )

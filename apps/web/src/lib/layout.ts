@@ -43,8 +43,8 @@ export function parseCols(c: string | undefined): Cols {
  */
 export const LIST_CLS: Record<Cols, string> = {
   1: 'mt-3 space-y-3',
-  2: 'mt-3 grid grid-cols-2 gap-3',
-  4: 'mt-3 grid grid-cols-4 gap-3',
+  2: 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2',
+  4: 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4',
 }
 
 /**

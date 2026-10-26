@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { Database } from 'better-sqlite3'
 
 const state = vi.hoisted(() => ({ enabled: true }))
 const encodeBatch = vi.fn(async (req: { inputs: unknown[] }) =>
@@ -15,7 +16,7 @@ vi.mock('./embed', () => ({
 }))
 
 let dataDir: string
-let db: any
+let db: Database
 
 beforeEach(async () => {
   state.enabled = true
@@ -38,6 +39,10 @@ function asset(kind: string, title: string): number {
     db.prepare('INSERT INTO assets (kind, title, collection_id) VALUES (?, ?, 1)').run(kind, title)
       .lastInsertRowid,
   )
+}
+
+function getRow<T>(sql: string, ...params: unknown[]): T {
+  return db.prepare(sql).get(...params) as T
 }
 
 describe('backfillEmbeddings', () => {
@@ -84,30 +89,26 @@ describe('backfillEmbeddings', () => {
       frameCaptions: 1,
       imageImages: 2,
       imageCaptions: 1,
+      audioFiles: 0,
       batches: 7,
     })
     expect(
-      db.prepare('SELECT embedding FROM text_notes WHERE asset_id = ?').get(noteAsset).embedding,
+      getRow<{ embedding: Buffer | null }>('SELECT embedding FROM text_notes WHERE asset_id = ?', noteAsset).embedding,
     ).not.toBeNull()
     expect(
-      db.prepare('SELECT embedding FROM chunks WHERE transcript_id = ? AND chunk_index = 0').get(transcriptId)
-        .embedding,
+      getRow<{ embedding: Buffer | null }>('SELECT embedding FROM chunks WHERE transcript_id = ? AND chunk_index = 0', transcriptId).embedding,
     ).not.toBeNull()
     expect(
-      db.prepare('SELECT embedding FROM chunks WHERE transcript_id = ? AND chunk_index = 1').get(transcriptId)
-        .embedding.equals(existing),
+      getRow<{ embedding: Buffer }>('SELECT embedding FROM chunks WHERE transcript_id = ? AND chunk_index = 1', transcriptId).embedding.equals(existing),
     ).toBe(true)
     expect(
-      db.prepare('SELECT embedding, caption_embedding FROM frames WHERE asset_id = ?').get(videoAsset)
-        .embedding,
+      getRow<{ embedding: Buffer | null }>('SELECT embedding, caption_embedding FROM frames WHERE asset_id = ?', videoAsset).embedding,
     ).not.toBeNull()
     expect(
-      db.prepare('SELECT caption_embedding FROM images WHERE asset_id = ?').get(imageAsset)
-        .caption_embedding,
+      getRow<{ caption_embedding: Buffer | null }>('SELECT caption_embedding FROM images WHERE asset_id = ?', imageAsset).caption_embedding,
     ).not.toBeNull()
     expect(
-      db.prepare('SELECT caption_embedding FROM images WHERE asset_id = ?').get(noCaptionAsset)
-        .caption_embedding,
+      getRow<{ caption_embedding: Buffer | null }>('SELECT caption_embedding FROM images WHERE asset_id = ?', noCaptionAsset).caption_embedding,
     ).toBeNull()
 
     // 第二次调用不应再发任何编码请求，也不能覆盖已有向量。
@@ -120,8 +121,39 @@ describe('backfillEmbeddings', () => {
       frameCaptions: 0,
       imageImages: 0,
       imageCaptions: 0,
+      audioFiles: 0,
       batches: 0,
     })
+    expect(encodeBatch).not.toHaveBeenCalled()
+  }, 30000)
+
+  it('回填音频文件向量，不把它错当成转写文本', async () => {
+    const audioAsset = asset('audio', '城市环境音')
+    db.prepare(
+      'INSERT INTO audio_files (asset_id, file_path, duration_ms, embedding) VALUES (?, ?, ?, NULL)',
+    ).run(audioAsset, 'city.wav', 5000)
+
+    const { backfillEmbeddings } = await import('./backfill')
+    const stats = await backfillEmbeddings({ batchSize: 1 })
+    expect(stats.audioFiles).toBe(1)
+    expect(
+      getRow<{ embedding: Buffer | null }>('SELECT embedding FROM audio_files WHERE asset_id = ?', audioAsset)
+        .embedding,
+    ).not.toBeNull()
+
+    const audioInputs = encodeBatch.mock.calls
+      .flatMap(([req]) => req.inputs)
+      .filter(
+        (input): input is { modality: 'audio'; path: string } =>
+          typeof input === 'object' &&
+          input !== null &&
+          (input as { modality?: string }).modality === 'audio',
+      )
+    expect(audioInputs).toEqual([{ modality: 'audio', path: 'city.wav' }])
+
+    encodeBatch.mockClear()
+    const second = await backfillEmbeddings()
+    expect(second.audioFiles).toBe(0)
     expect(encodeBatch).not.toHaveBeenCalled()
   }, 30000)
 

@@ -121,6 +121,4 @@ GLM-4-Flash-250414、GLM-Z1-Flash），没有视觉能力。接棒的 GLM-5.3-Fl
 
 ## 本地校验
 
-无测试基线。改动后按 spark 上 `bash start.sh` 重启两个服务，
-`curl http://127.0.0.1:8280/health` 应返回 `ok: true`，
-视频服务 `/health` 返回 `asr_loaded` 字段即可。
+先跑单元测试：`python -m unittest discover -s tests -v`。音频向量至少覆盖「dict 输入且不传 prompt」与「路径缺失明确 400」，不要在单元测试里拉真实模型。改动部署机代码后按 spark 上 `bash start.sh` 重启两个服务，`curl http://127.0.0.1:8280/health` 应返回 `ok: true`，视频服务 `/health` 返回 `asr_loaded` 字段即可。

@@ -5,7 +5,7 @@ import path from 'node:path'
 import { PATHS } from '@/lib/paths'
 import { ingestImage } from '@/lib/ingest'
 import { normalizeCollectionId } from '@/lib/collections'
-import { extOf, isAudioExt, isImageExt, isVideoExt, KINDS_BY_EXT } from '@/lib/mediaKind'
+import { extOf, isAudioExt, isImageExt, isVideoExt } from '@/lib/mediaKind'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -26,8 +26,6 @@ export const maxDuration = 300
  * 早先这里与 UploadPanel 各写一份（共三处），加音频时三处都要改，漏一处的表现
  * 是「前端选得进、服务端 400」，或者反过来「服务端收得下、前端根本不让你选」。
  */
-const { IMAGE_EXTS, VIDEO_EXTS, AUDIO_EXTS } = KINDS_BY_EXT
-
 export async function POST(req: Request) {
   let form: FormData
   try {

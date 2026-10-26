@@ -29,12 +29,11 @@ const KIND_SET = new Set<string>(ASSET_KINDS.map((k) => k.kind))
 
 
 import { getLibraryList } from '@/lib/library'
-import { toMediaUrl, toThumbUrl } from '@/lib/media'
+import { toThumbUrl } from '@/lib/media'
 import { LibraryDeleteButton } from '@/components/LibraryDeleteButton'
 import { LibraryEditButton } from '@/components/LibraryEditButton'
 import { CollectionScope } from '@/components/CollectionScope'
 import { CollectionMenu } from '@/components/CollectionMenu'
-import { BulkDeleteButton } from '@/components/BulkDeleteButton'
 import { BulkCaptionButton } from '@/components/BulkCaptionButton'
 import {
   listCollections,
@@ -84,13 +83,15 @@ function AssetCheckbox({
   title: string
 }) {
   return (
-    <input
-      type="checkbox"
-      name={name}
-      value={value}
-      aria-label={`选择 ${title}`}
-      className="mt-1 h-4 w-4 flex-none cursor-pointer appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-neutral-100 checked:bg-neutral-100 checked:after:block checked:after:h-4 checked:after:w-4 checked:after:text-center checked:after:text-[10px] checked:after:leading-4 checked:after:text-neutral-900 checked:after:content-['✓']"
-    />
+    <label className="inline-flex h-11 w-11 flex-none cursor-pointer items-center justify-center">
+      <input
+        type="checkbox"
+        name={name}
+        value={value}
+        aria-label={`选择 ${title}`}
+        className="h-4 w-4 flex-none cursor-pointer appearance-none rounded-sm border border-neutral-600 bg-neutral-900 checked:border-neutral-100 checked:bg-neutral-100 checked:after:block checked:after:h-4 checked:after:w-4 checked:after:text-center checked:after:text-[10px] checked:after:leading-4 checked:after:text-neutral-900 checked:after:content-['✓']"
+      />
+    </label>
   )
 }
 
@@ -236,7 +237,7 @@ function MoreLink({
   return (
     <Link
       href={`/library?${keep.toString()}&n=${shown + PAGE}`}
-      className="mt-3 block w-full rounded-md border border-neutral-800 px-3 py-2 text-center text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200"
+      className="mt-3 flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-800 px-3 py-2 text-center text-xs text-neutral-300 hover:border-neutral-600 hover:text-neutral-100"
     >
       显示更多（还有 {remaining} {unit}）
     </Link>
@@ -253,7 +254,6 @@ export default async function LibraryPage({
     kw?: string
     c?: string
     made?: string
-    renamed?: string
     deleted?: string
     bulkRemoved?: string
     moved?: string
@@ -269,7 +269,6 @@ export default async function LibraryPage({
     kw,
     c,
     made,
-    renamed,
     deleted,
     bulkRemoved: bulkRemovedCount,
     moved: movedCount,
@@ -290,7 +289,6 @@ export default async function LibraryPage({
   const collections = all.map((c) => ({ id: c.id, name: c.name }))
   const madeId = made ? Number(made) : null
   const madeName = madeId ? (all.find((c) => c.id === madeId)?.name ?? null) : null
-  const renamedId = renamed ? Number(renamed) : null
   const deletedId = deleted ? Number(deleted) : null
   const deletedName = deletedId ? (all.find((c) => c.id === deletedId)?.name ?? null) : null
   const bulkRemoved = bulkRemovedCount ? Number(bulkRemovedCount) : null
@@ -309,6 +307,10 @@ export default async function LibraryPage({
   /** 单栏时卡片是横排（缩略图在左），多栏时改竖排，否则窄栏里图和字挤在一起 */
   const wide = cols === 1
   const listCls = LIST_CLS[cols]
+  const hasAnyAsset = ASSET_KINDS.some((k) => data.counts[k.kind] > 0)
+  /** 默认浏览不拿空分区占位；指定类型或关键词时仍展示可解释的空态。 */
+  const showSection = (section: NonNullable<LibraryFilter['kind']>, count: number) =>
+    kind ? kind === section : Boolean(keyword || count)
   /**
    * 多选态。**只认字面量 '1'，任何其他值（含空串）都是浏览态。**
    * 这样退出只需把参数拿掉，不存在「=0 也算开」的歧义。
@@ -336,8 +338,9 @@ export default async function LibraryPage({
   const exitSelectHref = `/library?${keepForCols.toString()}`
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <h1 className="text-2xl font-semibold">素材库</h1>
+    <div className="mx-auto w-full max-w-6xl">
+      <p className="eyebrow">浏览与管理</p>
+      <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">素材库</h1>
       <p className="mt-1 text-sm text-neutral-400">
         当前范围：{scopeLabel(collectionId)}
         {data.allCollections ? ' · 每条素材标注了所属库' : ''}
@@ -385,11 +388,11 @@ export default async function LibraryPage({
 
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
         {ASSET_KINDS.map((k) => (
-          <span key={k.kind}>
+          <span key={k.kind} className="hidden sm:inline">
             {k.label} {data.counts[k.kind]}
           </span>
         ))}
-        <span className="ml-auto flex items-center gap-1.5">
+        <span className="ml-auto hidden items-center gap-1.5 sm:flex">
           <span className="text-neutral-400">栏数</span>
           {COL_OPTIONS.map((o) => {
             const active = cols === Number(o.value)
@@ -399,18 +402,14 @@ export default async function LibraryPage({
               <Link
                 key={o.value}
                 href={withSelect(`/library?${href.toString()}`)}
-                className={`rounded border px-2 py-0.5 text-xs transition ${
-                  active
-                    ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
-                    : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
-                }`}
+                className={`filter-chip ${active ? 'filter-chip-active' : ''}`}
               >
                 {o.label}
               </Link>
             )
           })}
         </span>
-        <span className="flex items-center gap-1.5">
+        <span className="flex min-w-0 items-center gap-1.5 overflow-x-auto pb-1">
           <span className="text-neutral-400">类型</span>
           {FILTERS.map((f) => {
             const active = (kind ?? 'all') === f.value
@@ -420,11 +419,7 @@ export default async function LibraryPage({
                 href={withSelect(
                   `/library?lib=${libQ}&k=${f.value}&kw=${encodeURIComponent(keyword)}`,
                 )}
-                className={`rounded border px-2 py-0.5 text-xs transition ${
-                  active
-                    ? 'border-neutral-100 bg-neutral-100 text-neutral-900'
-                    : 'border-neutral-700 text-neutral-400 hover:border-neutral-500 hover:text-neutral-200'
-                }`}
+                className={`filter-chip ${active ? 'filter-chip-active' : ''}`}
               >
                 {f.label}
               </Link>
@@ -433,7 +428,7 @@ export default async function LibraryPage({
         </span>
       </div>
 
-      <form action="/library" method="get" className="mt-3 flex gap-2">
+      <form action="/library" method="get" className="mt-4 flex gap-2">
         <input type="hidden" name="lib" value={libQ} />
         <input type="hidden" name="k" value={kind ?? 'all'} />
         {selecting && <input type="hidden" name="select" value="1" />}
@@ -441,11 +436,12 @@ export default async function LibraryPage({
           name="kw"
           defaultValue={keyword}
           placeholder="按标题或画面描述筛选"
-          className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-xs outline-none focus:border-neutral-500"
+          aria-label="按标题或画面描述筛选"
+          className="min-h-11 min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-neutral-500"
         />
         <button
           type="submit"
-          className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-500"
+          className="btn-secondary flex-none px-4 text-xs"
         >
           筛选
         </button>
@@ -459,7 +455,21 @@ export default async function LibraryPage({
         )}
       </form>
 
-      <section className="mt-8">
+      {!hasAnyAsset && !kind && !keyword && (
+        <section className="panel mt-6 px-5 py-8 text-center" data-tour="library-empty">
+          <h2 className="text-sm font-medium text-neutral-200">这个范围还没有素材</h2>
+          <p className="mt-2 text-xs leading-5 text-neutral-400">先添加图片、视频、音频或文本，之后就能在这里浏览与管理。</p>
+          <Link
+            href={collectionId === ALL_COLLECTIONS ? '/ingest' : `/ingest?lib=${libQ}`}
+            className="btn-primary mt-5 inline-flex px-4"
+          >
+            去入库
+          </Link>
+        </section>
+      )}
+
+      {showSection('video', data.video.length) && (
+      <section className="mt-6">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">视频</h2>
           {data.video.length > 0 && (
@@ -495,8 +505,8 @@ export default async function LibraryPage({
                     key={v.id}
                     className={
                       wide
-                        ? 'rounded-md border border-neutral-800 bg-neutral-900/60 p-4'
-                        : 'flex flex-col rounded-md border border-neutral-800 bg-neutral-900/60 p-2'
+                        ? 'panel p-4'
+                        : 'panel flex flex-col p-2'
                     }
                   >
                     {/*
@@ -546,7 +556,8 @@ export default async function LibraryPage({
                     )}
                     <Link
                       href={`/library/video/${v.id}`}
-                      className={wide ? 'flex min-w-0 flex-1 items-start gap-3' : 'block min-w-0'}
+                      data-tour="asset-detail"
+                      className={wide ? 'library-media-link flex min-w-0 flex-1 items-start gap-3' : 'library-media-link block min-w-0'}
                     >
                       {cover ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -613,7 +624,9 @@ export default async function LibraryPage({
           unit="个"
         />
       </section>
+      )}
 
+      {showSection('image', data.image.length) && (
       <section className="mt-10">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">图片</h2>
@@ -652,8 +665,8 @@ export default async function LibraryPage({
                     key={im.id}
                     className={
                       wide
-                        ? 'rounded-md border border-neutral-800 bg-neutral-900/60 p-4'
-                        : 'flex flex-col rounded-md border border-neutral-800 bg-neutral-900/60 p-2'
+                        ? 'panel p-4'
+                        : 'panel flex flex-col p-2'
                     }
                   >
                     {/*
@@ -706,7 +719,8 @@ export default async function LibraryPage({
                     )}
                     <Link
                       href={`/library/image/${im.id}`}
-                      className={wide ? 'flex min-w-0 flex-1 items-start gap-3' : 'block min-w-0'}
+                      data-tour="asset-detail"
+                      className={wide ? 'library-media-link flex min-w-0 flex-1 items-start gap-3' : 'library-media-link block min-w-0'}
                     >
                       {thumb ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -776,6 +790,7 @@ export default async function LibraryPage({
           unit="张"
         />
       </section>
+      )}
 
       {/*
         **音频段。** 位置在图片之后、文本之前，与检索页类型筛选的顺序一致
@@ -788,6 +803,7 @@ export default async function LibraryPage({
         - 没有「查看逐字稿与关键帧」那句 meta，只有句数与块数。
         - 编辑框只给标题与标签：音频没有整片描述字段（描述是逐帧的，音频没有帧）。
       */}
+      {showSection('audio', data.audio.length) && (
       <section className="mt-10">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">音频</h2>
@@ -820,8 +836,8 @@ export default async function LibraryPage({
                   key={au.id}
                   className={
                     wide
-                      ? 'rounded-md border border-neutral-800 bg-neutral-900/60 p-4'
-                      : 'flex flex-col rounded-md border border-neutral-800 bg-neutral-900/60 p-2'
+                      ? 'panel p-4'
+                      : 'panel flex flex-col p-2'
                   }
                 >
                   <div className="flex gap-3">
@@ -833,7 +849,7 @@ export default async function LibraryPage({
                       />
                     )}
                     <div className="min-w-0 flex-1">
-                      <Link href={`/library/audio/${au.id}`} className="block min-w-0">
+                      <Link href={`/library/audio/${au.id}`} className="block min-w-0" data-tour="asset-detail">
                         <p className="truncate text-sm text-neutral-200">{au.title}</p>
                         <p className="mt-1 text-xs text-neutral-400">
                           {fmtMs(au.durationMs)} · {au.sentences} 句 · {au.chunks} 块
@@ -899,7 +915,9 @@ export default async function LibraryPage({
           unit="条"
         />
       </section>
+      )}
 
+      {showSection('text', data.text.length) && (
       <section className="mt-10">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-sm font-medium text-neutral-300">文本</h2>
@@ -932,14 +950,15 @@ export default async function LibraryPage({
                   key={t.id}
                   className={
                     wide
-                      ? 'rounded-md border border-neutral-800 bg-neutral-900/60 p-4'
-                      : 'flex flex-col rounded-md border border-neutral-800 bg-neutral-900/60 p-2'
+                      ? 'panel p-4'
+                      : 'panel flex flex-col p-2'
                   }
                 >
                   <div className={wide ? 'flex items-center gap-3' : 'flex flex-col gap-1.5'}>
                     {selecting && <AssetCheckbox name="text" value={t.id} title={t.title} />}
                     <Link
                       href={`/library/text/${t.id}`}
+                      data-tour="asset-detail"
                       className="min-w-0 flex-1 hover:underline"
                       title="查看与编辑这段文本"
                     >
@@ -975,6 +994,7 @@ export default async function LibraryPage({
           unit="条"
         />
       </section>
+      )}
 
       {moved !== null && (
         <p className="mt-6 text-xs text-emerald-400">已移动 {moved} 条素材</p>

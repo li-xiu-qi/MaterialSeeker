@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ModalShell } from './ModalShell'
 
 /**
  * 素材的编辑入口。**编辑走模态框，不是就地展开。**
@@ -50,26 +51,6 @@ export function LibraryEditButton({
   const [g, setG] = useState(tags.join('，'))
   // 关闭后焦点回到打开它的按钮，否则键盘用户被丢回页面开头
   const triggerRef = useRef<HTMLButtonElement>(null)
-
-  // Esc 关模态；开着的时候锁背后那个页面的滚动，否则底下的页面会跟着滚，
-  // 关掉后位置已经变了。
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        setOpen(false)
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = prev
-      triggerRef.current?.focus()
-    }
-  }, [open])
 
   /** 描述字段这个模态给不给。视频与音频没有整片描述，给了也是白给。 */
   const canEditAnnotation = kind !== 'video' && kind !== 'audio'
@@ -126,17 +107,12 @@ export function LibraryEditButton({
         onClick，模态关了、保存请求也没发出去。
       */}
       {open && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
-          onClick={() => setOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label={`编辑 ${title}`}
+        <ModalShell
+          onClose={() => setOpen(false)}
+          label={`编辑 ${title}`}
+          returnFocusRef={triggerRef}
         >
-          <div
-            className="w-full max-w-md space-y-2.5 rounded-lg border border-neutral-700 bg-neutral-950 p-4"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="space-y-2.5">
             <p className="text-sm font-medium text-neutral-200">编辑素材</p>
 
             <label className="block text-xs text-neutral-400" htmlFor={`edit-t-${id}`}>
@@ -176,7 +152,7 @@ export function LibraryEditButton({
               className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-500"
             />
             <p className="text-xs leading-4 text-neutral-400">
-              标签会并进画面描述一起参与检索，打完标签后搜这些词也能找到它
+              标签用于整理素材；图片与视频还可按标签关键词检索
             </p>
 
             {err && <p className="text-xs text-red-400">{err}</p>}
@@ -186,7 +162,7 @@ export function LibraryEditButton({
                 type="button"
                 onClick={save}
                 disabled={saving}
-                className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-900 disabled:opacity-40"
+                className="btn-primary px-3 py-1 text-xs disabled:opacity-40"
               >
                 {saving ? '保存中' : '保存'}
               </button>
@@ -196,7 +172,7 @@ export function LibraryEditButton({
                   setOpen(false)
                   setErr('')
                 }}
-                className="text-xs text-neutral-400 hover:text-neutral-300"
+                className="min-h-11 px-2 text-xs text-neutral-400 hover:text-neutral-300"
               >
                 取消
               </button>
@@ -207,7 +183,7 @@ export function LibraryEditButton({
               )}
             </div>
           </div>
-        </div>
+        </ModalShell>
       )}
     </span>
   )

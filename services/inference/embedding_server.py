@@ -9,7 +9,7 @@ MaterialSeeker 推理服务（embedding）。
 
 接口：
   GET  /health                      模型与维度自检
-  POST /encode  {inputs: [...]}     批量编码（文本 / 图片 / 图加文组合）
+  POST /encode  {inputs: [...]}     批量编码（文本 / 图片 / 图加文组合 / 音频）
   POST /caption                     一张图生成标题/描述/标签
 
 **/caption 与 /encode 是两套完全不同的能力，不要试图合并。** /encode 出向量，
@@ -30,8 +30,10 @@ fp16 下返回 NaN 或静默掉分且不报错。
 
 import argparse
 import base64
+import binascii
 import logging
 import os
+import tempfile
 from typing import Literal
 
 import uvicorn
@@ -86,8 +88,19 @@ class ImageInput(BaseModel):
     instruction: str | None = None
 
 
+class AudioInput(BaseModel):
+    modality: Literal["audio"]
+    # 只认服务端可读的本地文件路径或 base64（data URL 亦可）。**不做远程
+    # 下载**：推理服务不替业务侧决定网络边界，URL 由调用方自己落地成文件。
+    path: str | None = None
+    b64: str | None = None
+    # 音频向量不走 task-prefix：EG2 模型卡的音频范式是 {"audio": path}，
+    # 不传 prompt。字段保留只为请求结构一致，服务端忽略。
+    instruction: str | None = None
+
+
 class EncodeRequest(BaseModel):
-    inputs: list[TextInput | ImageInput]
+    inputs: list[TextInput | ImageInput | AudioInput]
 
 
 class EmbeddingOut(BaseModel):
@@ -121,6 +134,29 @@ def embed_dim() -> int:
     基本不掉分；128 多模态掉大分，只用于纯文本）。默认 768 全量。
     改维度必须三处同步：业务仓 db.ts 的 VECTOR_DIM、embed.ts 的校验、这里。"""
     return int(os.environ.get("MATERIALSEEKER_DIM", "768"))
+
+
+def _resolve_audio_path(im: AudioInput, temp_paths: list[str]) -> str:
+    """把音频输入解析成服务端本地路径。b64 落临时文件，路径交给调用方清理。"""
+    if im.path:
+        if not os.path.isfile(im.path):
+            raise HTTPException(400, f"audio not found: {im.path}")
+        return im.path
+    if im.b64:
+        data = im.b64.split(",", 1)[-1] if im.b64.startswith("data:") else im.b64
+        try:
+            raw = base64.b64decode(data)
+        except (binascii.Error, ValueError):
+            raise HTTPException(400, "audio b64 is not valid base64")
+        if not raw:
+            raise HTTPException(400, "audio b64 is empty")
+        # 后缀不参与解码，只留给排查问题时认得出这是临时音频。
+        fd, tmp = tempfile.mkstemp(prefix="materialseeker-audio-", suffix=".audio")
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        temp_paths.append(tmp)
+        return tmp
+    raise HTTPException(400, "audio input needs path or b64")
 
 
 @app.get("/health")
@@ -232,6 +268,35 @@ def encode(req: EncodeRequest) -> dict:
         )
         for i, (idx, _, _) in enumerate(combo):
             result[idx] = to_out(vecs[i], dim)
+
+    # --- 音频：纯音频一批 ---
+    # st 6.1 的 dict 输入范式：{"audio": 本地路径}。不传 prompt，也不要
+    # 把音频塞进图加文组合——音频没有画面，组合出来的向量没有业务含义。
+    audio_idx = [i for i, item in enumerate(req.inputs) if isinstance(item, AudioInput)]
+    if audio_idx:
+        audio_paths: list[str] = []
+        temp_paths: list[str] = []
+        try:
+            for idx in audio_idx:
+                path = _resolve_audio_path(req.inputs[idx], temp_paths)  # type: ignore[arg-type]
+                audio_paths.append(path)
+            vecs = model.encode(
+                [{"audio": p} for p in audio_paths],
+                batch_size=4,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
+            for i, idx in enumerate(audio_idx):
+                result[idx] = to_out(vecs[i], dim)
+        finally:
+            # b64 落的是临时文件，无论前向成功失败都要清掉，不能把音频留在
+            # 临时目录里等操作系统某天清理。
+            for p in temp_paths:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
 
     if any(r is None for r in result):
         raise HTTPException(500, "some inputs were not encoded")

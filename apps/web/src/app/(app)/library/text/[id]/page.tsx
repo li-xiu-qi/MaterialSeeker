@@ -54,7 +54,7 @@ export default async function TextDetailPage({
         标注一改就要重编码（见 updateAssetMeta 的说明），所以保存后有短暂
         等待，这里说明一下，别让人以为页面卡住。
       */}
-      <details className="mt-6 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+      <details className="mt-6 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2" data-tour="asset-edit">
         <summary className="cursor-pointer text-xs text-neutral-400 marker:content-none hover:text-neutral-200">
           编辑这段文本
         </summary>

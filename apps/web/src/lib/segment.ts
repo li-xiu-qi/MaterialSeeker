@@ -36,7 +36,7 @@ type SegModule = {
 
 const resolved = (segmentitNs as unknown as SegModule) ?? {}
 const Segment: SegModule['Segment'] = resolved.Segment
-const useDefault: SegModule['useDefault'] = resolved.useDefault
+const createSegment: SegModule['useDefault'] = resolved.useDefault
 
 type SegInstance = { doSegment: (text: string, opts?: { simple?: boolean }) => string[] }
 
@@ -44,10 +44,10 @@ let segInstance: SegInstance | null = null
 
 function getSeg(): SegInstance {
   if (!segInstance) {
-    if (!Segment || !useDefault) {
+    if (!Segment || !createSegment) {
       throw new Error('segmentit 加载失败：Segment/useDefault 未导出，检查依赖版本')
     }
-    segInstance = useDefault(new Segment()) as SegInstance
+    segInstance = createSegment(new Segment()) as SegInstance
   }
   // 上面两条分支覆盖了 null 的两种来源（未初始化与初始化失败会抛），
   // 这里断言给 TS：函数内窄化在闭包里不保留，不做这个断言每个调用点都要判空。

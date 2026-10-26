@@ -35,6 +35,8 @@ export function typeLabel(type: string): string {
       return '关键帧'
     case 'image':
       return '图片'
+    case 'audio':
+      return '音频'
     default:
       return type
   }
@@ -53,6 +55,8 @@ export function sourceLabel(source: string): string {
       return '画面描述'
     case 'image_vector':
       return '图片'
+    case 'audio_vector':
+      return '音频内容'
     default:
       return source
   }

@@ -65,7 +65,7 @@ export default async function AudioDetailPage({
         逐字稿，而逐字稿是 ASR 产出的，不允许手改（改了就不再是「听到的」）。
         给一个描述输入框反而会造出一个检索不到的字段，所以不给。
       */}
-      <details className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2">
+      <details className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-3 py-2" data-tour="asset-edit">
         <summary className="cursor-pointer text-xs text-neutral-400 marker:content-none hover:text-neutral-200">
           编辑标题与标签
         </summary>
@@ -114,6 +114,7 @@ export default async function AudioDetailPage({
 
       <div className="mt-6">
         <VideoTranscriptPanel
+          key={`${asset.id}:${transcript?.sentences.length ?? 0}`}
           kind="audio"
           mediaUrl={audioUrl}
           currentMs={currentMs}
