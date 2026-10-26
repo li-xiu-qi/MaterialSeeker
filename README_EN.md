@@ -157,7 +157,7 @@ cp .env.example .env
 bash start.sh
 ```
 
-For vector-based semantic retrieval, use `standard` and configure the model and the two separate Python environments described in the same guide.
+For vector-based semantic retrieval, use `standard` and configure the model and the two separate Python environments described in the same guide. On edge devices such as Intel NPU, the 8280 encoder can switch to LiteRT-LM; see the “Edge / Intel NPU backend” section of the [inference service guide](services/inference/README.md).
 
 For API key setup, required credentials, and troubleshooting, see [API keys and runtime configuration](docs/configuration.en.md).
 

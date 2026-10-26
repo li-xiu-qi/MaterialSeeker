@@ -1,0 +1,8 @@
+# LiteRT-LM 推理后端依赖（Intel NPU / 边缘设备）。
+# 与 requirements-embedding.txt 二选一：默认 sentence-transformers 路径不需要
+# 本文件；把 MATERIALSEEKER_EMBEDDING_ENGINE 设为 litert 时安装它。
+#
+# litert-lm 自带 EmbeddingEngine 与 CPU/GPU/NPU 后端封装；Intel NPU 还需要
+# openvino 做设备枚举与运行时库加载。
+litert-lm>=0.18.0
+openvino

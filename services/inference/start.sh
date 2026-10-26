@@ -53,8 +53,11 @@ if [ "$PROFILE" = "light" ]; then
   echo "light mode: embedding service :8280 not started"
 elif [ "$PROFILE" = "standard" ]; then
   # 标准版沿用两个独立模型环境，embedding 与 FunASR 不合并。
+  # MATERIALSEEKER_EMBEDDING_PYTHON 可指向 LiteRT-LM 环境（例如 ke-1 上的
+  # litert-env），默认仍是 dgx-spark 的 eg2-env。
   export MATERIALSEEKER_PROFILE=standard
-  start_service embedding embedding_server.py 8280 "$HOME/eg2-env/bin/python"
+  EMBEDDING_PYTHON=${MATERIALSEEKER_EMBEDDING_PYTHON:-$HOME/eg2-env/bin/python}
+  start_service embedding embedding_server.py 8280 "$EMBEDDING_PYTHON"
   start_service video     video_server.py     8281 "$HOME/hearsight-env/bin/python"
 else
   echo "unknown MATERIALSEEKER_PROFILE: $PROFILE (expected light or standard)" >&2

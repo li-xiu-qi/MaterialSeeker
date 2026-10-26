@@ -53,6 +53,67 @@ MODEL_DIR = os.environ.get(
     os.path.expanduser("~/models/embeddinggemma-2"),
 )
 
+# 推理引擎开关。默认沿用 sentence-transformers（GPU/CUDA 路径）；litert 走
+# LiteRT-LM 的 EmbeddingEngine，用于 Intel NPU 等边缘设备。两条路径共用同一
+# HTTP 接口与 instruction 口径，业务侧无感。
+ENGINE_SENTENCE_TRANSFORMERS = "sentence-transformers"
+ENGINE_LITERT = "litert"
+
+# LiteRT-LM 的 .litertlm 模型包路径。默认用通用变体：它不绑定某一代 NPU 的
+# AOT 二进制，能在 CPU 上直接跑；Intel NPU 需要把路径换成与设备驱动 ABI 兼容
+# 的 AOT 变体（例如 embeddinggemma-2-740m_Intel_PTL.litertlm）。
+LITERT_MODEL = os.environ.get(
+    "MATERIALSEEKER_LITERT_MODEL",
+    os.path.expanduser(
+        "~/.litert-lm/cache/huggingface/litert-community/"
+        "embeddinggemma-2-740m-litert-lm/"
+        "embeddinggemma-2-740m.litertlm"
+    ),
+)
+
+
+def embedding_engine() -> str:
+    raw = os.environ.get("MATERIALSEEKER_EMBEDDING_ENGINE", ENGINE_SENTENCE_TRANSFORMERS)
+    raw = raw.strip().lower()
+    if raw not in (ENGINE_SENTENCE_TRANSFORMERS, ENGINE_LITERT):
+        raise RuntimeError(
+            "unknown MATERIALSEEKER_EMBEDDING_ENGINE: "
+            f"{raw}; expected {ENGINE_SENTENCE_TRANSFORMERS} or {ENGINE_LITERT}"
+        )
+    return raw
+
+
+def _litert_backend_name(env_name: str, default: str) -> str:
+    raw = os.environ.get(env_name, default).strip().lower()
+    if raw not in ("cpu", "gpu", "npu"):
+        raise RuntimeError(f"unknown {env_name}: {raw}; expected cpu, gpu or npu")
+    return raw
+
+
+def litert_backend() -> str:
+    return _litert_backend_name("MATERIALSEEKER_LITERT_BACKEND", "npu")
+
+
+def litert_vision_backend() -> str:
+    # 视觉/音频编码器当前不在 Intel NPU 上跑：LiteRT-LM 的 NPU 后端只覆盖文本
+    # 签名，视觉与音频仍回退 CPU。可用环境变量显式覆盖，但默认按实测边界走。
+    return _litert_backend_name("MATERIALSEEKER_LITERT_VISION_BACKEND", "cpu")
+
+
+def litert_audio_backend() -> str:
+    return _litert_backend_name("MATERIALSEEKER_LITERT_AUDIO_BACKEND", "cpu")
+
+
+def litert_text_prefix_mode() -> str:
+    raw = os.environ.get("MATERIALSEEKER_LITERT_TEXT_PREFIX_MODE", "prepend")
+    raw = raw.strip().lower()
+    if raw not in ("prepend", "none"):
+        raise RuntimeError(
+            "unknown MATERIALSEEKER_LITERT_TEXT_PREFIX_MODE: "
+            f"{raw}; expected prepend or none"
+        )
+    return raw
+
 
 def deployment_profile() -> str:
     raw = os.environ.get("MATERIALSEEKER_PROFILE", "standard").strip().lower()
@@ -65,6 +126,200 @@ def deployment_profile() -> str:
 
 def embedding_enabled() -> bool:
     return deployment_profile() == "standard"
+
+
+class LiteRTEmbeddingModel:
+    """把 LiteRT-LM EmbeddingEngine 包成 sentence-transformers 的 encode 形态。
+
+    这样 /encode 的分组逻辑不用分叉：文本、图片、图加文、音频仍按原有批次
+    进入，只是底层前向从 torch 换成 LiteRT。返回 list[list[float]]，由 to_out
+    统一截断与归一化。
+    """
+
+    def __init__(self):
+        try:
+            from litert_lm import Content
+            from litert_lm import EmbeddingEngine
+            from litert_lm import EmbeddingOptions
+            from litert_lm import interfaces
+        except ImportError as e:
+            raise RuntimeError(
+                "MATERIALSEEKER_EMBEDDING_ENGINE=litert 需要安装 litert-lm；"
+                "请先 `pip install litert-lm`（Intel NPU 还需 openvino）"
+            ) from e
+
+        self._Content = Content
+        self._EmbeddingOptions = EmbeddingOptions
+        self._interfaces = interfaces
+        self._raw_dim: int | None = None
+
+        def make_backend(name: str):
+            if name == "cpu":
+                threads = os.environ.get("MATERIALSEEKER_LITERT_THREADS")
+                return interfaces.CPU(
+                    thread_count=int(threads) if threads else None
+                )
+            if name == "gpu":
+                return interfaces.GPU()
+            dispatch_dir = os.environ.get("MATERIALSEEKER_LITERT_DISPATCH_LIB_DIR")
+            return interfaces.NPU(
+                litert_dispatch_lib_dir=dispatch_dir
+                if dispatch_dir is not None
+                else None
+            )
+
+        backend = make_backend(litert_backend())
+        vision_backend = make_backend(litert_vision_backend())
+        audio_backend = make_backend(litert_audio_backend())
+        requested = (litert_backend(), litert_vision_backend(), litert_audio_backend())
+
+        log.info(
+            "loading LiteRT model %s (backend=%s vision=%s audio=%s)",
+            LITERT_MODEL,
+            requested[0],
+            requested[1],
+            requested[2],
+        )
+
+        def create_engine(text_backend, vision, audio):
+            engine = EmbeddingEngine(
+                model_path=LITERT_MODEL,
+                backend=text_backend,
+                vision_backend=vision,
+                audio_backend=audio,
+            )
+            # 先挂到 self 再探测：_embed_one 走 self._engine。探测失败要清掉，
+            # 避免把半初始化的引擎留给回退分支。
+            self._engine = engine
+            try:
+                raw_dim = len(self._embed_one(self._Content.Text("dimension probe")).embedding)
+            except Exception:
+                self._engine = None
+                raise
+            return engine, raw_dim
+
+        try:
+            self._engine, self._raw_dim = create_engine(backend, vision_backend, audio_backend)
+            actual = requested
+        except Exception as accelerated_error:
+            # NPU/GPU 不可用或模型与驱动 ABI 不兼容时，回退 CPU。通用 .litertlm
+            # 变体在 CPU 上可直接跑；AOT NPU 变体回退后仍可能失败，那就让错误冒出去。
+            if all(name == "cpu" for name in requested):
+                raise RuntimeError(
+                    f"LiteRT EmbeddingEngine 初始化失败（backend={'/'.join(requested)}）: "
+                    f"{accelerated_error}"
+                ) from accelerated_error
+            log.warning(
+                "LiteRT backend %s unavailable, falling back to cpu: %s",
+                "/".join(requested),
+                accelerated_error,
+            )
+            try:
+                self._engine, self._raw_dim = create_engine(
+                    self._interfaces.CPU(), self._interfaces.CPU(), self._interfaces.CPU()
+                )
+            except Exception as cpu_error:
+                raise RuntimeError(
+                    "LiteRT EmbeddingEngine 初始化失败，且 CPU 回退也失败: "
+                    f"{cpu_error}"
+                ) from cpu_error
+            actual = ("cpu", "cpu", "cpu")
+
+        if actual == requested:
+            self._backend_name = f"litert:{actual[0]}/{actual[1]}/{actual[2]}"
+        else:
+            self._backend_name = (
+                f"litert:{actual[0]}/{actual[1]}/{actual[2]} "
+                f"(requested {requested[0]}/{requested[1]}/{requested[2]})"
+            )
+        log.info("LiteRT model loaded (%s, raw_dim=%s)", self._backend_name, self._raw_dim)
+
+    @property
+    def device(self) -> str:
+        return self._backend_name
+
+    def get_sentence_embedding_dimension(self) -> int:
+        if self._raw_dim is None:
+            self._raw_dim = len(self._embed_one(self._Content.Text("dimension probe")).embedding)
+        return self._raw_dim
+
+    def _embed_one(self, content):
+        return self._engine.compute_embedding(
+            content, options=self._EmbeddingOptions(normalize=True)
+        )
+
+    def _embed_batch(self, requests: list) -> list[list[float]]:
+        if not requests:
+            return []
+        responses = self._engine.compute_embedding_batch(
+            requests, options=self._EmbeddingOptions(normalize=True)
+        )
+        if len(responses) != len(requests):
+            raise RuntimeError(
+                f"LiteRT returned {len(responses)} embeddings for {len(requests)} inputs"
+            )
+        return [list(resp.embedding) for resp in responses]
+
+    @staticmethod
+    def _pil_to_bytes(image) -> bytes:
+        import io
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def encode(
+        self,
+        inputs,
+        prompt: str | None = None,
+        batch_size: int | None = None,
+        convert_to_numpy: bool | None = None,
+        normalize_embeddings: bool | None = None,
+        show_progress_bar: bool | None = None,
+        **_: object,
+    ) -> list[list[float]]:
+        """兼容 sentence-transformers 的 encode 调用签名。
+
+        prompt 只对文本生效：EG2 是 task-prefix 模型，索引/查询两侧前缀由业务
+        侧传入；LiteRT 侧按 prepend 模式拼到文本前。图片、图加文、音频沿用
+        模型卡范式，不传 prompt。
+        """
+        del batch_size, convert_to_numpy, normalize_embeddings, show_progress_bar
+
+        if not inputs:
+            return []
+
+        first = inputs[0]
+        if isinstance(first, str):
+            prefix_mode = litert_text_prefix_mode()
+            requests = []
+            for text in inputs:
+                content_text = f"{prompt}{text}" if prompt and prefix_mode == "prepend" else text
+                requests.append(self._Content.Text(content_text))
+            return self._embed_batch(requests)
+
+        if isinstance(first, dict) and "audio" in first:
+            requests = [self._Content.AudioFile(str(item["audio"])) for item in inputs]
+            return self._embed_batch(requests)
+
+        if isinstance(first, dict) and "image" in first:
+            # 图加文组合是一个 request 内的多内容序列；纯图每张一个 request。
+            if "text" in first and first["text"]:
+                requests = [
+                    [
+                        self._Content.ImageBytes(self._pil_to_bytes(item["image"])),
+                        self._Content.Text(str(item["text"])),
+                    ]
+                    for item in inputs
+                ]
+            else:
+                requests = [
+                    self._Content.ImageBytes(self._pil_to_bytes(item["image"]))
+                    for item in inputs
+                ]
+            return self._embed_batch(requests)
+
+        raise RuntimeError(f"unsupported LiteRT encode input: {type(first)!r}")
 
 
 app = FastAPI(title="MaterialSeeker Inference")
@@ -113,6 +368,10 @@ def get_model():
     if not embedding_enabled():
         raise HTTPException(503, "embedding is disabled in light mode")
     if _model is None:
+        if embedding_engine() == ENGINE_LITERT:
+            _model = LiteRTEmbeddingModel()
+            return _model
+
         import torch
         from sentence_transformers import SentenceTransformer
 
@@ -171,15 +430,26 @@ def health():
         }
     if _model is None:
         return {"ok": False, "profile": profile, "embedding_enabled": True, "detail": "model not loaded yet"}
-    return {
+    engine = embedding_engine()
+    payload = {
         "ok": True,
         "profile": profile,
         "embedding_enabled": True,
-        "model": MODEL_DIR,
+        "engine": engine,
         "raw_dim": _model.get_sentence_embedding_dimension(),
         "truncated_dim": embed_dim(),
         "device": str(_model.device),
     }
+    if engine == ENGINE_LITERT:
+        payload["model"] = LITERT_MODEL
+        payload["backends"] = {
+            "text": litert_backend(),
+            "vision": litert_vision_backend(),
+            "audio": litert_audio_backend(),
+        }
+    else:
+        payload["model"] = MODEL_DIR
+    return payload
 
 
 @app.post("/encode")
@@ -468,11 +738,13 @@ def normalize_tags(v) -> list[str]:
 
 def to_out(vec, dim: int) -> EmbeddingOut:
     """MRL 截断到目标维度，并重新归一化（截断后余弦口径一致）。"""
-    v = vec[:dim]
-    n = float((v * v).sum() ** 0.5)
-    if n > 0:
-        v = v / n
-    return EmbeddingOut(vector=[float(x) for x in v], dim=dim)
+    # LiteRT 返回 list[float]，sentence-transformers 返回 numpy；两条路径都走
+    # 同一套 Python 运算，避免在 to_out 里依赖某一端的数组协议。
+    values = [float(x) for x in vec[:dim]]
+    norm = sum(x * x for x in values) ** 0.5
+    if norm > 0:
+        values = [x / norm for x in values]
+    return EmbeddingOut(vector=values, dim=dim)
 
 
 if __name__ == "__main__":

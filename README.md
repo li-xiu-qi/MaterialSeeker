@@ -157,7 +157,7 @@ cp .env.example .env
 bash start.sh
 ```
 
-需要向量语义检索时，改用 `standard`，并按同一文档配置模型与两个独立 Python 环境。
+需要向量语义检索时，改用 `standard`，并按同一文档配置模型与两个独立 Python 环境。边缘设备（如 Intel NPU）可把 8280 的编码引擎切成 LiteRT-LM，配置方法见 [推理服务说明](services/inference/README.md) 的「边缘 / Intel NPU 后端」。
 
 API Key 的获取方式、必填条件和常见报错见 [API 密钥与运行配置](docs/configuration.md)。
 

@@ -67,6 +67,36 @@ bash start.sh
 
 两个环境不能合并。标准版启动时会加载 EmbeddingGemma 2；轻量版不会导入 torch 或读取模型权重。
 
+### 边缘 / Intel NPU 后端（LiteRT-LM）
+
+`MATERIALSEEKER_EMBEDDING_ENGINE=litert` 时，8280 不改 HTTP 接口，只把底层
+前向从 sentence-transformers 换成 LiteRT-LM 的 `EmbeddingEngine`，用于 Intel
+NPU 等边缘设备。视觉与音频编码器默认回退 CPU，文本主干走 NPU。
+
+```bash
+python3 -m venv ~/materialseeker-litert-env
+~/materialseeker-litert-env/bin/pip install -r requirements-litert.txt
+# 默认用通用 .litertlm 变体，CPU 可直接跑
+export MATERIALSEEKER_PROFILE=standard
+export MATERIALSEEKER_EMBEDDING_ENGINE=litert
+export MATERIALSEEKER_EMBEDDING_PYTHON=$HOME/materialseeker-litert-env/bin/python
+# Intel NPU 需要把模型换成与设备驱动 ABI 兼容的 AOT 变体
+export MATERIALSEEKER_LITERT_MODEL=$HOME/.litert-lm/cache/huggingface/litert-community/embeddinggemma-2-740m-litert-lm/embeddinggemma-2-740m_Intel_PTL.litertlm
+# 可选：文本 / 视觉 / 音频后端，默认 npu / cpu / cpu
+export MATERIALSEEKER_LITERT_BACKEND=npu
+export MATERIALSEEKER_LITERT_VISION_BACKEND=cpu
+export MATERIALSEEKER_LITERT_AUDIO_BACKEND=cpu
+bash start.sh
+```
+
+`/health` 会报告 `engine`、`backends` 与 `raw_dim`；文本仍按原有 task-prefix
+口径拼接，业务仓不用区分跑在 GPU 还是 NPU。
+
+**NPU 模型与驱动 ABI 必须匹配。** 预编译的 `Intel_PTL` 变体面向 Panther Lake，
+ Meteor Lake 等设备若报 `ELF_ABI_VERSION is NOT compatible`，说明该 AOT 二进制
+比当前 NPU 驱动新；此时改用通用 `.litertlm` 变体，服务会自动回退 CPU。代码保留
+NPU 入口，不影响业务接口。
+
 ## 接口
 
 ### 8280
@@ -90,6 +120,7 @@ bash start.sh
 | `requirements-core.txt` | HTTP 与云端 provider 公共依赖，不含本地模型 |
 | `requirements-light.txt` | 轻量版完整依赖，增加场景检测与抽帧 |
 | `requirements-embedding.txt` | 标准版 8280 的模型依赖 |
+| `requirements-litert.txt` | LiteRT-LM / Intel NPU 后端的 8280 依赖 |
 | `requirements-video.txt` | 标准版 8281 的媒体处理与 FunASR 依赖 |
 
 ffmpeg 不在 Python 依赖内，需单独安装并用 `FFMPEG_BIN` 指向二进制文件。

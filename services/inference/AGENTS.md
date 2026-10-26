@@ -41,10 +41,23 @@ monorepo 结构与部署纪律以仓库根 `AGENTS.md` 为权威，本文件只�
 requirements-core.txt       HTTP 与云端 provider 公共依赖，不含本地模型
 requirements-light.txt      core + scenedetect / opencv / numpy，轻量版完整依赖
 requirements-embedding.txt  标准版 8280 的 torch / sentence-transformers / pillow
+requirements-litert.txt     LiteRT-LM / Intel NPU 后端 8280 的依赖
 requirements-video.txt      标准版 8281 的媒体处理与 FunASR
 ```
 
-轻量启动脚本只起 8281，并停止旧 8280；标准启动脚本仍用 `eg2-env` 与 `hearsight-env`。`embedding_server.py` 的 torch import 必须在 `get_model()` 内，轻量启动与 `/health` 不得读取模型权重。轻量新素材的向量字段为 NULL；切回标准后用 `POST /api/maintenance/backfill-embeddings` 显式回填，不自动执行。
+轻量启动脚本只起 8281，并停止旧 8280；标准启动脚本仍用 `eg2-env` 与 `hearsight-env`，可用 `MATERIALSEEKER_EMBEDDING_PYTHON` 指向 LiteRT-LM 环境。`embedding_server.py` 的 torch import 必须在 `get_model()` 内，轻量启动与 `/health` 不得读取模型权重。轻量新素材的向量字段为 NULL；切回标准后用 `POST /api/maintenance/backfill-embeddings` 显式回填，不自动执行。
+
+## embedding 引擎：sentence-transformers 与 LiteRT-LM
+
+`MATERIALSEEKER_EMBEDDING_ENGINE` 决定 8280 的底层前向，默认
+`sentence-transformers`（GPU 路径）。设为 `litert` 时走 LiteRT-LM
+`EmbeddingEngine`，用于 Intel NPU 等边缘设备；HTTP 契约、instruction 口径、
+向量维度都不变。
+
+- `MATERIALSEEKER_LITERT_MODEL`：`.litertlm` 模型包路径，默认通用变体；Intel NPU 用与设备驱动 ABI 兼容的 AOT 变体。
+- `MATERIALSEEKER_LITERT_BACKEND` / `MATERIALSEEKER_LITERT_VISION_BACKEND` / `MATERIALSEEKER_LITERT_AUDIO_BACKEND`：默认 `npu` / `cpu` / `cpu`。视觉与音频当前不回退 NPU，除非上游明确支持。NPU 初始化或探测失败会自动回退 CPU，`/health` 的 `device` 会带 `requested` 标记。
+- `MATERIALSEEKER_LITERT_TEXT_PREFIX_MODE`：默认 `prepend`，按 EmbeddingGemma 2 的 task-prefix 口径把 instruction 拼到文本前。
+- `/health` 增加 `engine` 与 `backends`，排障时先看这里，不要从进程名猜跑在哪。
 
 ## 同步红线
 
@@ -63,7 +76,7 @@ requirements-video.txt      标准版 8281 的媒体处理与 FunASR
 
 | 端口 | 进程 | 环境 | 职责 |
 |---|---|---|---|
-| 8280 | embedding_server.py | `~/eg2-env` | EmbeddingGemma 2 多模态 embedding 编码（GPU） |
+| 8280 | embedding_server.py | `~/eg2-env` 或 LiteRT-LM 环境 | EmbeddingGemma 2 多模态 embedding 编码（GPU / Intel NPU） |
 | 8281 | video_server.py | `~/hearsight-env` | 抽音轨、ASR、场景检测、抽帧 |
 
 **embedding 的环境是 `~/eg2-env`，不是 xinfer-env。** 版本链是模型卡硬性
